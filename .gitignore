@@ -1,0 +1,42 @@
+# --- Existing entries (preserved) ---
+*.dat
+*.pyc
+
+# --- Large data files ---
+*.cdf
+*.pqt
+*.npz
+*.bsp
+*.mp4
+*.pptx
+*.xlsx
+*.for
+*.pro
+*.nml
+
+# --- Binary / media files ---
+*.gif
+*.png
+*.jpg
+*.jpeg
+
+# --- Generated / cache ---
+__pycache__/
+.ipynb_checkpoints/
+.DS_Store
+
+# --- Large simulation output data ---
+todo_gena_code/Statistic/Ground_represent/A/
+todo_gena_code/Statistic/Ground_represent/B/
+todo_gena_code/Statistic/Ground_represent/**/*.csv
+
+# --- MkDocs build output ---
+site/
+
+# --- Agent evidence artifacts ---
+.omo/
+
+# Local development and agent workspace artifacts
+.codex-tmp/
+node_modules/
+*.swp

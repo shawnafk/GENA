@@ -1,0 +1,4 @@
+interface:
+  display_name: "GENA"
+  short_description: "Navigate and use the GENA-CODE-Dev scientific API"
+  default_prompt: "Use $gena to locate and call the correct GENA-CODE-Dev functions for this analysis task."

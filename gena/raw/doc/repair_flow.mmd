@@ -1,0 +1,140 @@
+flowchart TD
+    START([START])  -->
+    INIT["
+        Read ITERANCE.NML
+        Set PI, OE=82.927, HE=5.2247
+        Init NVO=NVI=NIN=0
+        Open files: ENA, VALID, INITIAL, VOID, CONTOUR
+    "]
+    
+    LOOP["Read record K: date, time,<br/>TOF01, TOF11, X1S1…Y2E1, AMP1"] 
+    
+    PARSE["Parse datetime<br/>hour -= 8 (Beijing→UTC)<br/>if hour<0: day--, hour+=24"]
+
+    INIT --> LOOP --> PARSE --> NPM
+
+    NPM{"NPM=0?"}
+    PA["Use A params<br/>CofX=145/(AXR-AXL), CofY=55/(AYU-AYD)<br/>Z0X,Z0Y,CX,CY from A bounds, ETof=AETof"]
+    PB["Use B params<br/>CofX=145/(BXR-BXL), CofY=55/(BYU-BYD)<br/>Z0X,Z0Y,CX,CY from B bounds, ETof=BETof"]
+
+    NPM -->|"0"| PA
+    NPM -->|"1"| PB
+    
+    PA & PB --> TOFC1
+
+subgraph TOFCORR["TOF Correction"]
+    direction LR
+    TOFC1{Triggering time reversed?
+    Tof0 \> 2 AND Tof1 \< Tof0}
+    Redo_tof["redo tof, set tof1 = tof0 and set tof0 = 0"]
+    
+    TOFC1 -->|YES| Redo_tof --> TOFC2
+    TOFC1 -->|NO| TOFC2
+    
+    TOFC2{Rollover? start \> end}
+    Tdc_corr["Add Correction on end channel end + 663.47 ns"]
+    TOFC2 -->|YES| Tdc_corr --> ZERO
+    TOFC2 -->|NO| ZERO
+    
+    ZERO{"Missing Both End Signals? 
+    (X1e=0 AND X2e=0) 
+    OR 
+    (Y1e=0 AND Y2e=0)"}
+end
+
+ZERO -->|Yes| L11
+ZERO -->|No| S0
+
+subgraph SPOS["Start Position"]
+    direction LR
+    S0["set flag 
+	    KX=KY=0"] 
+    
+    SX{"TXs valid? 
+	    XL&lt;X2s-X1s&lt;XR"
+	}
+	SY{"TYs valid?
+		YD&lt;Y2s-Y1s&lt;YU"
+	}
+	SC{"KX,KY status?"}
+	
+	GTCX1["get tof start time and coord; Tofx0=(X2s+X1s-Cx)/2;Xs=(X2s-X1s-Z0X)*CofX"]
+	GTCY1["get tof start time and coord; Tofx0=(Y2s+Y1s-Cy)/2;Xs=(Y2s-Y1s-Z0X)*CofX"]
+    S0 --> SX 
+    SX -->|"YES KX=0"| GTCX1 --> SY
+    SX -->|"NO; KX=1"| SY
+    SY -->|"YES KY=0"| GTCY1 --> SC
+    SY -->|"NO; KY=1"| SC
+end
+
+SC -->|"0,0"| SB["Tofs=MAX(Tofx0,Tofy0)"]
+SC -->|"1,1"| L11
+SC -->|"0,1 Y missing"| SR1["Tofs=Tofx0<br/>Repair Ys from closer of<br/>Y2s or Y1s to Tofs"]
+SC -->|"1,0 X missing"| SR2["Tofs=Tofy0<br/>Repair Xs from closer of<br/>X2s or X1s to Tofs"]
+
+SR1 -.-SR12_details
+SR2 -.-SR12_details
+SR12_details["
+IF(ABS(Y2S-TofS).LT.ABS(Y1s-TofS)) THEN		
+	Ys=(2*(TofS-Y2s)-CY-Z0Y)*CofY
+	if((Y1s-Tofs).GT.CY) Y1e=Y1s
+ 
+"]
+
+SR1 & SR2 --> SBD{"|Xs|≤45<br/>AND |Ys|≤15?"}
+SBD -->|No| L11
+SBD -->|Yes| E0
+SB --> E0
+
+subgraph EPOS["End Position LABEL 20"]
+    direction LR
+    
+    GTCX2["get tof end time and coord; Tofx1=(X2e+X1e-Cx)/2;Xe=(X2e-X1e-Z0X)*CofX"]
+	GTCY2["get tof end time and coord; Tofy1=(Y2e+Y1e-Cy)/2;Xe=(Y2e-Y1e-Z0X)*CofY"]
+	
+    E0["KKX=KKY=0"] --> EX{"Xe valid?"} ---|"✓ KKX=0"| GTCX2 --> EY{"Ye valid?"}
+    EX -->|"✗ KKX=1"| EY
+    EY ---|"✓ KKY=0"| GTCY2 --> EC{"KKX,KKY<br/>status?"}
+    EY -->|"✗ KKY=1"| EC
+end
+
+EC -->|"0,0"| EB["Tofe=MIN(Tofy1,Tofx1)<br/>if Tofe≤Tofs: Tofe=MAX(Tof1,Tofx1)"]
+EC -->|"1,1"| L22
+EC -->|"0,1 Y missing"| ER1["Tofe=Tofx1<br/>Repair Ye from closer of<br/>Y2e or Y1e to Tofe"]
+EC -->|"1,0 X missing"| ER2["Tofe=Tofy1<br/>Repair Xe from closer of<br/>X2e or X1e to Tofe"]
+ER1 & ER2 --> V0
+EB --> V0
+
+subgraph VAL["Validation & Output"]
+    V0{"All checks pass?<br/>|Xe|≤75, |Ye|≤27.5<br/>6≤DTof≤187<br/>|DX|≤45, |DY|≤15"} -->|No| L22
+    V0 -->|Yes| AZEL["Azi=atan(DX/50)*180/PI<br/>Elv=atan(DY/50)*180/PI ±5<br/>MI=INT(Azi/3)+16, MJ=INT(Elv/3)+9<br/>ANGLE(MI,MJ)++"]
+    AZEL --> PID{"Particle ID"}
+    PID -->|"DTof<40"| HP["H+ (NPar=1)<br/>Eng=HE·(DL/DTof)²"]
+    PID -->|"DTof>66.3"| OP["O+ (NPar=0)<br/>Eng=OE·(DL/DTof)²"]
+    PID -->|"40≤DTof≤66.3"| AMP{"AMP>1580?"}
+    AMP -->|Yes| OP
+    AMP -->|No| HP
+    HP & OP --> VALID["Write VALID (unit 4)<br/>NVI++"]
+end
+
+L11["L11: Write VOID<br/>NVO++"] --> NEXT
+L22["L22: Write INITIAL<br/>NIN++"] --> NEXT
+VALID --> NEXT
+
+NEXT{"K < KKK?"} -->|Yes| LOOP
+NEXT -->|No| FIN["Write CONTOUR (unit 7)<br/>Close all files<br/>Print NVO, NVI, NIN"]
+FIN --> END([END])
+
+classDef void fill:#f7768e,stroke:#1a1b26,color:#1a1b26
+classDef initial fill:#e0af68,stroke:#1a1b26,color:#1a1b26
+classDef valid fill:#9ece6a,stroke:#1a1b26,color:#1a1b26
+classDef repair fill:#7aa2f7,stroke:#1a1b26,color:#1a1b26
+classDef terminal fill:#ff9e64,stroke:#1a1b26,color:#1a1b26
+classDef decision fill:#bb9af7,stroke:#1a1b26,color:#1a1b26
+
+class L11 void
+class L22 initial
+class VALID valid
+class SR1,SR2,ER1,ER2 repair
+class START,END terminal
+class NPM,ZERO,SC,SBD,EC,V0,PID,AMP,NEXT decision

@@ -1,0 +1,88 @@
+{
+  "coordinate_system": "GSE",
+  "keys": {
+    "ATMS1": {
+      "coverage_end": "2026-08-27T11:00:00+00:00",
+      "coverage_start": "2024-06-01T00:00:00+00:00",
+      "sources": {
+        "artemisp1": {
+          "downloaded_through": "2026-08-06T00:00:00+00:00",
+          "resolution_factor": 2
+        },
+        "artemisp1pred": {
+          "downloaded_through": "2026-08-27T11:00:00+00:00",
+          "resolution_factor": 2
+        }
+      }
+    },
+    "ATMS2": {
+      "coverage_end": "2026-08-27T11:00:00+00:00",
+      "coverage_start": "2024-06-01T00:00:00+00:00",
+      "sources": {
+        "artemisp2": {
+          "downloaded_through": "2026-08-06T00:00:00+00:00",
+          "resolution_factor": 2
+        },
+        "artemisp2pred": {
+          "downloaded_through": "2026-08-27T11:00:00+00:00",
+          "resolution_factor": 2
+        }
+      }
+    },
+    "MMS1": {
+      "coverage_end": "2026-08-27T11:12:30+00:00",
+      "coverage_start": "2024-06-01T00:00:30+00:00",
+      "sources": {
+        "mms1": {
+          "downloaded_through": "2026-08-27T11:12:30+00:00",
+          "resolution_factor": 16
+        }
+      }
+    },
+    "THA": {
+      "coverage_end": "2026-08-27T11:00:00+00:00",
+      "coverage_start": "2024-06-01T00:00:00+00:00",
+      "sources": {
+        "themisa": {
+          "downloaded_through": "2026-08-06T00:00:00+00:00",
+          "resolution_factor": 2
+        },
+        "themisapred": {
+          "downloaded_through": "2026-08-27T11:00:00+00:00",
+          "resolution_factor": 2
+        }
+      }
+    },
+    "THD": {
+      "coverage_end": "2026-08-27T11:00:00+00:00",
+      "coverage_start": "2024-06-01T00:00:00+00:00",
+      "sources": {
+        "themisd": {
+          "downloaded_through": "2026-08-05T23:58:00+00:00",
+          "resolution_factor": 2
+        },
+        "themisdpred": {
+          "downloaded_through": "2026-08-27T11:00:00+00:00",
+          "resolution_factor": 2
+        }
+      }
+    },
+    "THE": {
+      "coverage_end": "2026-08-27T11:00:00+00:00",
+      "coverage_start": "2024-06-01T00:00:00+00:00",
+      "sources": {
+        "themise": {
+          "downloaded_through": "2026-08-05T23:58:00+00:00",
+          "resolution_factor": 2
+        },
+        "themisepred": {
+          "downloaded_through": "2026-08-27T11:00:00+00:00",
+          "resolution_factor": 2
+        }
+      }
+    }
+  },
+  "source": "https://sscweb.gsfc.nasa.gov/WS/sscr/2",
+  "unit": "R_E",
+  "updated_at": "2026-08-27T03:28:23.368683+00:00"
+}

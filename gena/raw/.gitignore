@@ -1,0 +1,63 @@
+# Byte-compiled / optimized files
+__pycache__/
+*.py[cod]
+*.pyc
+*$py.class
+# Distribution / packaging
+Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+*.egg-info/
+installed.cfg
+*.egg
+MANIFEST
+# Flask-specific
+instance/
+webassets-cache
+# Virtual environments
+env
+venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+# Unit test / coverage reports
+htmlcov/
+tox/
+nox/
+coverage
+coverage.*
+pytest_cache/
+cache
+# Logs
+*.log
+# IDE/project settings
+idea/
+vscode/
+*.sublime-project
+*.sublime-workspace
+# Jupyter Notebook checkpoints
+ipynb_checkpoints
+# MyPy / type checker
+mypy_cache/
+dmypy.json
+pytype/
+# PyInstaller
+*.spec
+# Local database files
+*.sqlite3
+*.db
+*.sqlite
+# Secrets
+*.pem
+*.key
+*.crt
+
+.DS_Store
+.omc/
+.claude/
+test/
