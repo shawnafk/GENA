@@ -7,11 +7,7 @@ import matplotlib.pyplot as plt
 import pytest
 
 from common.frame import TimeSeriesDataFrame, concat
-from load.loaders.gena import (
-    _time_columns,
-    assemble,
-    frame_to_spedas_dict,
-)
+from load.api.public import _time_columns, assemble
 from load.api.spedas import _variable_layouts, parse_spedas
 from common.frame import split_time_intervals
 from common.time import Time
@@ -59,9 +55,11 @@ def test_shared_frame_outer_joins_and_round_trips_multidimensional_data():
     np.testing.assert_array_equal(frame.loc[1, "peir_en_eflux"], [100, 200])
     np.testing.assert_array_equal(frame.loc[1, "peir_en_eflux_energy"], [10, 20])
 
-    restored = frame_to_spedas_dict(frame)
-    np.testing.assert_allclose(restored["velocity_gsm"]["y"], [[1, 2, 3], [4, 5, 6]])
-    np.testing.assert_allclose(restored["peir_en_eflux"]["v"], [[10, 20], [10, 20]])
+    from common.frame import read_variable
+    restored_velocity = read_variable(frame, "velocity_gsm")
+    restored_energy = read_variable(frame, "peir_en_eflux")
+    np.testing.assert_allclose(restored_velocity["values"], [[1, 2, 3], [4, 5, 6]])
+    np.testing.assert_allclose(restored_energy["axes"]["v"], [[10, 20], [10, 20]])
 
 
 def test_time_inputs_are_normalized_to_naive_pandas_datetime():
@@ -406,10 +404,11 @@ def test_themis_esd_uses_native_names_and_preserves_three_dimensional_axes(monke
     np.testing.assert_array_equal(frame.loc[1, "eflux"], np.arange(8.0, 16.0).reshape(2, 4))
     np.testing.assert_array_equal(frame.loc[1, "eflux_v1"], [0, 1])
     np.testing.assert_array_equal(frame.loc[1, "eflux_v2"], [0, 1, 2, 3])
-    restored = frame_to_spedas_dict(frame)
-    assert restored["eflux"]["y"].shape == (3, 2, 4)
-    assert restored["eflux"]["v1"].shape == (2,)
-    assert restored["eflux"]["v2"].shape == (4,)
+    from common.frame import read_variable
+    restored = read_variable(frame, "eflux")
+    assert restored["values"].shape == (3, 2, 4)
+    assert restored["axes"]["v1"].shape == (2,)
+    assert restored["axes"]["v2"].shape == (4,)
 
 
 def test_themis_esd_rejects_non_l2_levels():

@@ -217,7 +217,7 @@ def test_iterable_times_are_normalized_without_losing_numeric_meaning():
     (Time(1), [1., 2., 3.]),
     (pd.Timestamp("1970-01-01T08:00:01+08:00"), [1., 2., 3.]),
     (pd.Series(pd.to_datetime(["1970-01-01T08:00:01+08:00", "1970-01-01T08:00:30+08:00"])),
-     [[1., 30.], [2., 60.], [3., 90.]]),
+     [[1., 2., 3.], [30., 60., 90.]]),
 ])
 def test_themis_position_uses_utc_seconds_for_every_input_shape(monkeypatch, value, expected):
     import importlib
@@ -234,6 +234,19 @@ def test_themis_position_uses_utc_seconds_for_every_input_shape(monkeypatch, val
     np.testing.assert_allclose(loader.get_themis_loc(value), expected)
     assert calls[0][0].startswith("1969-12-31T23:")
     assert calls[0][1].startswith("1970-01-01T01:")
+
+
+def test_themis_position_accepts_multiple_intervals(monkeypatch):
+    import importlib
+
+    loader = importlib.import_module("load.load")
+
+    def local_state(mission, trange, *args, **kwargs):
+        return {"thb_pos_gsm": {"x": [0., 60.], "y": np.array([[0., 0., 0.], [60., 120., 180.]])}}
+
+    monkeypatch.setattr(loader, "load_spedas", local_state)
+    result = loader.get_themis_loc([[1, 2], [30, 31]])
+    np.testing.assert_allclose(result, [[1., 2., 3.], [2., 4., 6.], [30., 60., 90.], [31., 62., 93.]])
 
 
 def test_scene_time_normalization_keeps_native_pandas_and_numeric_seconds():

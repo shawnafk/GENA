@@ -9,14 +9,8 @@ from common.frame import TimeSeriesDataFrame, concat
 from gena.frame import ParticleDataFrame
 from load.api.spedas import _variable_layouts
 from common.frame import read_variable
-from load.load import (
-    _clip_variable_dict,
-    _merge_variable_dicts,
-    assemble,
-    frame_to_spedas_dict,
-    parse_omni_hro_cdf,
-    parse_spedas,
-)
+from load.api.public import _clip_variable_dict, _merge_variable_dicts, assemble
+from load.api.spedas import parse_spedas
 
 
 loader = importlib.import_module("load.load")
@@ -94,10 +88,10 @@ def test_explicit_three_channels_and_three_components_are_distinct():
     assert "alpha_x" not in frame and "alpha_energy" not in frame
     np.testing.assert_array_equal(frame.loc[0, "channels"], [1, 2, 3])
     assert frame["north"].tolist() == [1, 4]
-    restored = frame_to_spedas_dict(frame)
-    assert restored["alpha"]["units"] == "counts"
-    assert restored["alpha"]["attrs"] == raw["alpha"]["attrs"]
-    np.testing.assert_array_equal(restored["alpha"]["v"], [10, 20, 30])
+    restored = read_variable(frame, "alpha")
+    assert restored["units"] == "counts"
+    assert restored["attrs"] == raw["alpha"]["attrs"]
+    np.testing.assert_array_equal(restored["axes"]["v"], [10, 20, 30])
 
 
 @pytest.mark.parametrize("shape", [(2, 3), (2, 3, 4), (2, 3, 4, 5)])
@@ -106,7 +100,7 @@ def test_unknown_multidimensional_product_is_not_guessed_as_vector(shape):
     frame = spedas_dict_to_frame(raw, layouts=_variable_layouts(raw))
     assert frame.attrs["variables"]["unknown"]["kind"] == "array"
     assert frame.loc[0, "unknown"].shape == shape[1:]
-    np.testing.assert_array_equal(frame_to_spedas_dict(frame)["unknown"]["y"], raw["unknown"]["y"])
+    np.testing.assert_array_equal(read_variable(frame, "unknown")["values"], raw["unknown"]["y"])
 
 
 def test_product_specific_vector_and_energy_rules():
@@ -166,21 +160,6 @@ def test_variable_reader_reads_only_requested_columns_and_concat_keeps_axes():
     joined = concat([make(1., [1, 2, 3]), make(2., [4, 5, 6])])
     joined.attrs["variables"]["unrelated"] = {"kind": "scalar", "columns": ["absent"]}
     np.testing.assert_array_equal(read_variable(joined, "s")["axes"]["v"], [[1, 2, 3], [4, 5, 6]])
-
-
-def test_local_omni_cdf_decodes_epoch_fills_and_units():
-    class Field:
-        attrs = {"FILLVAL": -999., "UNITS": "nT"}
-
-        def __array__(self, dtype=None, copy=None):
-            return np.array([1., -999., 3.], dtype=dtype)
-
-    cdf = {"Epoch": pd.date_range("2025-03-11", periods=3, freq="min"), "BX_GSE": Field()}
-    parsed = parse_omni_hro_cdf(cdf, ["BX_GSE"], ["2025-03-11", "2025-03-11 00:01"])
-    frame = assemble(parsed, source="omni", product="hro", level="hro")
-    assert frame["Datetime"].tolist() == list(cdf["Epoch"][:2])
-    assert np.isnan(frame.loc[1, "BX_GSE"])
-    assert frame.attrs["variables"]["BX_GSE"]["units"] == "nT"
 
 
 def test_loader_override_time_axis_is_used_during_clipping(monkeypatch):

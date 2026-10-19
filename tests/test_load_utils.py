@@ -3,7 +3,7 @@ import pandas as pd
 
 import common
 import common.frame as common_frame
-from load.loaders.gena import _clip_variable_dict
+from load.api.public import _clip_variable_dict
 
 
 def test_clip_variable_dict_is_private_to_load_and_clips_inclusively():

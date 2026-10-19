@@ -12,10 +12,9 @@ from common.time import Time
 from load.api.spedas import (
     OMNI_FIELDS, parse_spedas, read_spedas,
 )
-from load.loaders.gena import (
-    _clip_variable_dict, _common_utils, _iter_intervals, _merge_variable_dicts,
-    assemble, concat,
-)
+from load.api.public import _clip_variable_dict, _merge_variable_dicts, assemble
+from common.frame import concat
+from load.loaders.common import iter_intervals
 
 logger = logging.getLogger(__name__)
 OMNI_VARIABLES = list(OMNI_FIELDS["hro"]["default"])
@@ -45,7 +44,7 @@ def load_spedas(
             raise ValueError("THEMIS ESD datatype must be a non-empty string")
     probe = ("a" if mission == "themis" else 1) if probe is None and mission != "omni" else probe
     chunks, raw_chunks = [], []
-    for interval in _iter_intervals(trange):
+    for interval in iter_intervals(trange):
         dates = [value.isoformat() for value in interval]
         raw, interval_layouts = read_spedas(
             mission, dates, product=product, variables=variables, probe=probe,

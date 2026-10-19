@@ -1,7 +1,9 @@
 """One index-loading pipeline; source access and field rules live in the API."""
 
 from load.api.indices import read_indices, parse_indices
-from load.loaders.gena import _iter_intervals, _merge_variable_dicts, assemble, concat
+from load.loaders.common import iter_intervals
+from load.api.public import _merge_variable_dicts, assemble
+from common.frame import concat
 
 __all__ = ["load_indices"]
 
@@ -19,7 +21,7 @@ def load_indices(trange, product=None, *, prefix=None, download="local_first", r
     if return_type not in {"dataframe", "dict"}:
         raise ValueError("return_type must be 'dataframe' or 'dict'")
     chunks, raw_chunks = [], []
-    for interval in _iter_intervals(trange):
+    for interval in iter_intervals(trange):
         data, layouts = read_indices(interval, product, prefix=prefix, download=download, timeout=timeout)
         if return_type == "dict":
             raw_chunks.append(data)

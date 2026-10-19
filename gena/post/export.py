@@ -13,7 +13,6 @@ import pandas as pd
 
 from common.config import resolve_output_path
 from common.time import Time
-from libs.utils import normalize_probe
 from plots.vis import savefig
 from plots import ani as gena_ani
 from gena import utils as gut
@@ -75,6 +74,13 @@ _FIGURE_FILENAMES = {
     "hist_Layer2": "{prob}_hist_Layer2.jpg",
     "hist_FOV": "{prob}_hist_FOV.jpg",
 }
+
+
+def normalize_probe(prob):
+    prob = str(prob).strip().lower()
+    if prob not in {"a", "b"}:
+        raise ValueError("prob must be 'A' or 'B'")
+    return prob
 
 
 def _day_period(day):

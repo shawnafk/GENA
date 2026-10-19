@@ -11,6 +11,7 @@ from libs import utils as _common_utils
 from load.loaders.gena import load_gena
 from load.loaders.indices import load_indices
 from load.loaders.spedas import load_spedas
+from load.loaders.common import is_multi_interval
 from load.api.spedas import read_spedas
 from load.api.indices import read_indices
 
@@ -80,31 +81,17 @@ def _backend_position(value, variable_name, reader):
 
 
 def get_themis_loc(t, probe="b", coord="gsm"):
-    """Interpolate a THEMIS probe position at arbitrary UTC times.
+    """Interpolate a THEMIS probe position in the common ``(N, 3)`` layout.
 
     The source is the THEMIS state product. ``coord`` is the state-variable
     coordinate suffix, such as ``gsm`` or ``gse``; values retain the source
-    product's native position unit.
+    product's native position unit. A scalar time returns one ``(3,)`` vector.
     """
-    probe = str(probe).lower()
-    if probe not in {"a", "b", "c", "d", "e"}:
-        raise ValueError("THEMIS probe must be one of 'a', 'b', 'c', 'd', or 'e'")
-    coord = str(coord).lower()
-    variable_name = f"th{probe}_pos_{coord}"
-
-    def reader(trange, name):
-        return load_spedas(
-            "themis", trange, "state", variables=[name], probe=probe,
-            level="l1", return_type="dict",
+    if is_multi_interval(t):
+        return np.concatenate(
+            [get_themis_loc(interval, probe=probe, coord=coord) for interval in t],
+            axis=0,
         )
-
-    result = _backend_position(t, variable_name, reader)
-    # Keep the original helper's array convention for existing callers.
-    return result.T if result.ndim == 2 else result
-
-
-def _get_themis_position(t, probe="b", coord="gsm"):
-    """Return a THEMIS position in the common ``(N, 3)`` layout."""
     probe = str(probe).lower()
     if probe not in {"a", "b", "c", "d", "e"}:
         raise ValueError("THEMIS probe must be one of 'a', 'b', 'c', 'd', or 'e'")
@@ -123,8 +110,15 @@ def get_mms_loc(t, probe="1", coord="gsm", *, download=None, **kwargs):
     """Interpolate an MMS MEC position at arbitrary UTC times.
 
     MMS MEC position variables are named ``mmsN_mec_r_COORD``. The returned
-    values retain the MEC product's native unit, normally kilometres.
+    values retain the MEC product's native unit, normally kilometres. Nested
+    ``[[start, end], ...]`` input is evaluated interval by interval and
+    concatenated in the input order.
     """
+    if is_multi_interval(t):
+        return np.concatenate(
+            [get_mms_loc(interval, probe=probe, coord=coord, download=download, **kwargs) for interval in t],
+            axis=0,
+        )
     probe = str(probe)
     if probe not in {"1", "2", "3", "4"}:
         raise ValueError("MMS probe must be one of '1', '2', '3', or '4'")
@@ -160,8 +154,14 @@ def get_goes_loc(t, satellite, coord="gsm", *, download=None, **kwargs):
 
     ``satellite`` is the GOES spacecraft number. Orbit vectors are loaded
     from pySPEDAS and retain the ephemeris product's native unit, normally
-    kilometres.
+    kilometres. Nested ``[[start, end], ...]`` input is evaluated interval by
+    interval and concatenated in the input order.
     """
+    if is_multi_interval(t):
+        return np.concatenate(
+            [get_goes_loc(interval, satellite, coord=coord, download=download, **kwargs) for interval in t],
+            axis=0,
+        )
     try:
         satellite = str(int(satellite))
     except (TypeError, ValueError) as exc:
@@ -196,8 +196,14 @@ def get_queqiao_loc(t, satellite=None):
     The PDF position columns are Moon-relative MJ2000 coordinates in metres.
     ``satellite`` is accepted for symmetry with the other mission helpers and
     is currently ignored because the configured PDF contains one Queqiao
-    spacecraft trajectory.
+    spacecraft trajectory. Nested ``[[start, end], ...]`` input is evaluated
+    interval by interval and concatenated in the input order.
     """
+    if is_multi_interval(t):
+        return np.concatenate(
+            [get_queqiao_loc(interval, satellite=satellite) for interval in t],
+            axis=0,
+        )
     times, dates, _ = _position_times(t)
     frame = load_gena(
         trange=_padded_position_range(dates),
@@ -211,14 +217,16 @@ def get_queqiao_loc(t, satellite=None):
 def load_pos(mission, trange, id=None, *, coord="gsm", **kwargs):
     """Return interpolated spacecraft positions for a supported mission.
 
-    ``trange`` may be a scalar or a one-dimensional sequence of UTC times;
-    the result is one ``(x, y, z)`` vector for a scalar and an ``(N, 3)``
-    array otherwise. THEMIS ids are ``a``-``e``, MMS ids are ``1``-``4``, and
-    GOES ids are spacecraft numbers. Queqiao uses the local GENA PDF orbit.
+    ``trange`` may be a scalar, a one-dimensional sequence of UTC times, or a
+    nested sequence of two-value intervals. Nested intervals are evaluated and
+    concatenated in input order. The result is one ``(x, y, z)`` vector for a
+    scalar and an ``(N, 3)`` array otherwise. THEMIS ids are ``a``-``e``, MMS
+    ids are ``1``-``4``, and GOES ids are spacecraft numbers. Queqiao uses the
+    local GENA PDF orbit.
     """
     key = str(mission).strip().lower()
     if key == "themis":
-        return _get_themis_position(trange, probe="a" if id is None else id, coord=coord)
+        return get_themis_loc(trange, probe="a" if id is None else id, coord=coord)
     if key == "mms":
         return get_mms_loc(trange, probe="1" if id is None else id, coord=coord, **kwargs)
     if key in {"goes", "goes-r"}:

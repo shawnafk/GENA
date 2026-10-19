@@ -3,7 +3,8 @@ import pandas as pd
 import pytest
 
 from common.frame import TimeSeriesDataFrame
-from load.load import _time_columns, assemble, parse_spedas
+from load.api.public import _time_columns, assemble
+from load.api.spedas import parse_spedas
 from load.api.spedas import _variable_layouts
 from libs.regions import classify_kiehas, classify_liuzzo, classify_runov
 

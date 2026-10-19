@@ -48,7 +48,7 @@ Each variable description passed to :func:`assemble` is stored as ``name -> desc
 GENA Parquet products are the exception to the parser/assembler path. Particle products contain independent event rows and parameter products already have a table layout, so :func:`load_gena` constructs their specialized frame classes directly.
 """
 
-THEMIS, MMS, and OMNI use the shared loading pipeline in `load.loaders.spedas.load_spedas()`. That module owns interval iteration, clipping, assembly, concatenation, and return-type handling. Only `load_spedas()` is exposed as the SPEDAS loader; mission-specific alignment and scientific helpers remain in the same module. GENA and indices retain separate source loaders.
+THEMIS, MMS, and OMNI use the shared loading pipeline in `load.loaders.spedas.load_spedas()`. Shared interval normalization lives in `load.loaders.common`; the mission loaders own clipping, assembly, concatenation, and return-type handling. Only `load_spedas()` is exposed as the SPEDAS loader; mission-specific alignment and scientific helpers remain in the same module. GENA and indices retain separate source loaders.
 
 The sole loading entrypoint is `load_spedas(mission, trange, product, ...)`. Mission-specific public wrappers and intermediate product-loading functions have been removed. All missions use `read_spedas()` followed by clipping, `parse_spedas()`, and `assemble()`. Dictionary output retains backend variable names and native axes. Default download policies are configured in `SPEDAS_OPTIONS` and resolved by the read API.
 
