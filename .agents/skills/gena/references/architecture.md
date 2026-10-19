@@ -115,7 +115,7 @@ Use `.agents/skills/gena/scripts/api_query.py` before relying on this static map
 | Load MMS | `load` | `load_spedas("mms", ...)` |
 | Load OMNI | `load` | `load_spedas("omni", ...)` |
 | Load geomagnetic indices | `load` / `load.api.indices` | `load_indices`, `read_indices`, `parse_indices`; field definitions in `INDICES_FIELDS` |
-| Combine solar-wind context | `libs.environment` | `sw_keys` |
+| Combine solar-wind context | `load` | `load_sw` |
 | Sun/Moon/satellite ephemeris | `libs.ephemeris` | `sun`, `moon`, `satellites`, `update_satellite_orbits` (`satellites` returns GSE positions in `R_E`, rejects out-of-coverage requests by default, and accepts opt-in `update=True`) |
 | Plasma physics | `libs.plasma` | `alfven_velocity`, `beta`, `sigma_HH`, `f_maxwellian` |
 | Magnetosphere regions/models | `libs.space` | region classifier, bow shock/magnetopause objects, `T96_fieldlines.trace_lines_y0`, `T96NeutralSheet.surface_xyz` |
@@ -279,7 +279,7 @@ Keep provenance (probe, coordinate system, product level, units) in names or
 metadata. Plotting helpers expect already-loaded dictionaries/DataFrames; they
 should not own download or analysis policy.
 
-For environment context at selected times, `libs.environment.sw_keys()` combines
+For environment context at selected times, `load.load_sw()` combines
 OMNI and Dst and falls back to defaults on load failure. Use lower-level loaders
 when failure must be explicit rather than silently replaced.
 

@@ -56,7 +56,7 @@ GENA-CODE-Dev/
 | 原则 | 实现方式 |
 |------|----------|
 | 加载流程集中组织 | `load` 在同一模块中组织来源解析、时间序列表组装和具名任务加载器 |
-| 共享基础设施集中管理 | 时间、表格同步、坐标和几何放在 `common/`，其他插值小工具在 `libs.utils`，通用绘图在 `plots.vis` |
+| 共享基础设施集中管理 | 时间、表格同步、坐标、几何和插值放在 `common/`，通用绘图在 `plots.vis` |
 | 跨任务物理模型独立管理 | 等离子体、星历和空间环境模型放在 `libs/` |
 | 跨任务分析采用组合方式 | 分析脚本分别加载各任务数据，再显式对齐和组合 |
 | 依赖方向单一 | 分析层依赖任务包和 `libs`，任务包与 `libs` 依赖 `common` |
@@ -102,7 +102,7 @@ from plots.basic.mms import fpi, hpca
 # OMNI 太阳风和地磁指数
 from load import load_spedas
 from load import load_indices
-from libs.environment import sw_keys
+from load import load_sw
 
 # 共享基础设施
 from common import Time, Coordinates, TimeIndexedDataFrame, TimeSeriesDataFrame
@@ -347,7 +347,7 @@ hpca = load_spedas("mms", trange, "hpca", probe=1)
 # OMNI 太阳风和地磁指数
 from load import load_spedas
 from load import load_indices
-from libs.environment import sw_keys
+from load import load_sw
 
 omni = load_spedas("omni", trange)
 auroral = load_indices(trange)          # 同时包含 AE、AL 和 AU
@@ -358,7 +358,7 @@ context = load_indices(trange, ["sym_h", "kp", "ap_daily", "f107"], download="lo
 import pandas as pd
 
 t = pd.date_range("2024-11-12", "2024-11-13", freq="5min")
-environment = sw_keys(t)
+environment = load_sw(t)
 ```
 
 THEMIS、MMS、OMNI 和地磁指数加载器可能访问网络。代码审查和离线测试不应隐式触发下载，应使用现有本地数据、小型内存数据表或模拟加载边界。`gena.raw.decode.decode()` 会写入 Parquet 产品和日志，仅在明确执行原始数据转换任务时调用。
@@ -372,7 +372,7 @@ THEMIS、MMS、OMNI 和地磁指数加载器可能访问网络。代码审查和
 3. 在命名加载器中明确解释产品字段、时间轴、分量和附加轴；`assemble()` 只验证并组装这些变量说明，共享类型不处理存储格式。
 4. 在 `plots/basic/<mission>.py` 中实现任务专用绘图，并复用 `plots.vis` 的坐标轴和通用时序绘图基础设施。
 5. 使用 `common.config.resolve_paths()` 进行只读路径解析；真正读写前使用 `configure()` 或 `get_configured_paths()` 校验路径。
-6. 坐标变换和几何运算使用 `common.coord`，时间解析使用 `common.time`，连续量表同步使用 `TimeSeriesDataFrame`，其他插值小工具使用 `libs.utils`。
+6. 坐标变换和几何运算使用 `common.coord`，时间解析使用 `common.time`，连续量表同步使用 `TimeSeriesDataFrame`，插值工具使用 `common.interp`。
 7. 不得从其他任务包横向导入。跨任务分析应在分析脚本中分别加载各任务数据并显式组合。
 
 ---

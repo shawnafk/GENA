@@ -12,7 +12,7 @@ from gena.constants import init_param
 from gena.post import statistic as sts
 from plots import vis
 from plots import vis as _vis_utils
-from libs import utils as _common_utils
+from common.interp import i1d
 def _interpolate_nonzero_parameter(pdf, name):
     """Fill zero-valued engineering samples for plotting only."""
     timestamp = pdf["Timestamp"].to_numpy(dtype=float)
@@ -91,7 +91,7 @@ def ho_ratio(l2, f=None, ax=None):
     ax[0].plot(tH_n, nH_flux, label='H')
     ax[0].plot(tO_n, nO_flux, label='O')
     ax[0].legend()
-    fh = _common_utils.i1d([t.timestamp() for t in tH_n], nH_flux, bounds_error=False, fill_value=1e9)
+    fh = i1d([t.timestamp() for t in tH_n], nH_flux, bounds_error=False, fill_value=1e9)
     H_at_Otime = fh([t.timestamp() for t in tO_n])
     ax[1].plot(tO_n, nO_flux / (H_at_Otime + nO_flux))
     ax[1].set_ylabel('O/Tot')

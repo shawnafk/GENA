@@ -17,7 +17,7 @@ from libs import plasma
 from plots import vis
 from libs.spectrum import normalize_flux_by_energy_band
 from .timeseries import tplot as _tplot
-from libs import utils as _common_utils
+from common.time import Time
 
 
 def get_ma_beta(fgm, esa, mom, prefix=None, thres_ma=50, thres_bt=50):
@@ -35,10 +35,10 @@ def get_ma_beta(fgm, esa, mom, prefix=None, thres_ma=50, thres_bt=50):
     # Use the high-cadence magnetic-field time grid. Source NaNs must be
     # removed before interpolation; scipy.interp1d otherwise propagates them
     # across neighboring intervals and creates artificial gaps.
-    t_eval = np.asarray(_common_utils.Time(fgm_B['x']).to_timestamp(), dtype=float)
+    t_eval = np.asarray(Time(fgm_B['x']).to_timestamp(), dtype=float)
 
     def interpolate_valid(variable, values):
-        source_t = np.asarray(_common_utils.Time(variable['x']).to_timestamp(), dtype=float)
+        source_t = np.asarray(Time(variable['x']).to_timestamp(), dtype=float)
         source_y = np.asarray(values, dtype=float)
         valid = np.isfinite(source_t) & np.isfinite(source_y)
         if valid.sum() < 2:
@@ -75,8 +75,8 @@ def velocity_parallel_perp(fgm, mom, prefix=None, max_distance_seconds=60.0):
     """
     _, magnetic = _variable(fgm, 'fgs_gsm', prefix)
     _, velocity = _variable(mom, 'peim_velocity_gsm', prefix)
-    magnetic_time = np.asarray(_common_utils.Time(magnetic['x']).to_timestamp(), dtype=float)
-    velocity_time = np.asarray(_common_utils.Time(velocity['x']).to_timestamp(), dtype=float)
+    magnetic_time = np.asarray(Time(magnetic['x']).to_timestamp(), dtype=float)
+    velocity_time = np.asarray(Time(velocity['x']).to_timestamp(), dtype=float)
     magnetic_value = np.asarray(magnetic['y'], dtype=float)
     velocity_value = np.asarray(velocity['y'], dtype=float)
 

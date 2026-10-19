@@ -4,18 +4,144 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from functools import wraps
+from collections.abc import Mapping
 
 from common.time import Time
-from libs import utils as _common_utils
+from common.interp import f_interp_vars
+from common.time import Time
 
-from load.loaders.gena import load_gena
-from load.loaders.indices import load_indices
-from load.loaders.spedas import load_spedas
-from load.loaders.common import is_multi_interval
+from load.loaders.gena import load_gena as _load_gena
+from load.loaders.indices import load_indices as _load_indices
+from load.loaders.spedas import load_spedas as _load_spedas
 from load.api.spedas import read_spedas
 from load.api.indices import read_indices
+from common.frame import concat
+from load.api.public import _merge_variable_dicts
 
 
+def is_multi_interval(trange):
+    """Return whether *trange* is a nested sequence of intervals."""
+    return isinstance(trange, (list, tuple)) and bool(trange) and isinstance(trange[0], (list, tuple))
+
+
+def normalize_interval(trange):
+    """Normalize one inclusive interval to two ordered UTC timestamps."""
+    dates = Time(trange).datetime
+    if isinstance(dates, pd.Timestamp) or len(dates) != 2:
+        raise ValueError("trange must contain exactly two time values")
+    if dates[0] > dates[1]:
+        raise ValueError("trange start must not be later than end")
+    return dates
+
+
+def iter_intervals(trange):
+    """Normalize one interval or a nested sequence of intervals."""
+    ranges = trange if is_multi_interval(trange) else [trange]
+    return [normalize_interval(interval) for interval in ranges]
+
+
+def _merge_interval_results(results):
+    if not results:
+        return None
+    first = results[0]
+    if isinstance(first, Mapping):
+        return _merge_variable_dicts(results)
+    if isinstance(first, np.ndarray):
+        return np.concatenate(results, axis=0)
+    if isinstance(first, pd.DataFrame):
+        return concat(results)
+    return results
+
+
+def _multi_interval(func):
+    """Apply a loader or location function once per requested interval."""
+    @wraps(func)
+    def wrapped(*args, **kwargs):
+        trange = kwargs.get("trange")
+        position = None
+        if trange is None and len(args) > 1:
+            position = 1
+            trange = args[position]
+        if trange is None or not is_multi_interval(trange):
+            return func(*args, **kwargs)
+        results = []
+        for interval in iter_intervals(trange):
+            if position is None:
+                call_kwargs = dict(kwargs)
+                call_kwargs["trange"] = interval
+                results.append(func(*args, **call_kwargs))
+            else:
+                call_args = list(args)
+                call_args[position] = interval
+                results.append(func(*call_args, **kwargs))
+        return _merge_interval_results(results)
+    return wrapped
+
+
+load_gena = _multi_interval(_load_gena)
+load_indices = _multi_interval(_load_indices)
+load_spedas = _multi_interval(_load_spedas)
+
+
+def load_sw(t, *, trange_pad="1h", verbose=False, **kwargs):
+    """Load and interpolate common solar-wind and geomagnetic keys."""
+    times = Time(t)
+    scalar = times.isscalar
+    datetimes = pd.DatetimeIndex([times.datetime]) if scalar else times.datetime
+    if datetimes.empty:
+        return {}
+
+    float_t = np.atleast_1d(times.to_timestamp())
+    pad = pd.Timedelta(trange_pad)
+    trange = [
+        (datetimes.min() - pad).isoformat(),
+        (datetimes.max() + pad).isoformat(),
+    ]
+    namelist = ["Pressure", "BY_GSM", "BZ_GSM", "Beta", "Mgs_mach_num", "SYM_H"]
+    values = {}
+    try:
+        omni_kwargs = dict(kwargs)
+        omni_kwargs.pop("variables", None)
+        omni_kwargs.pop("return_type", None)
+        omni_data = load_spedas(
+            "omni", product="hro", trange=trange,
+            variables=namelist, return_type="dict", **omni_kwargs,
+        )
+        for name in namelist:
+            values[name] = f_interp_vars(omni_data[name])(float_t)
+        if verbose:
+            print("load solar wind parameters successfully")
+    except Exception as exc:
+        if verbose:
+            print("Warning: cannot load omni data, set all default.", exc)
+        values.update({
+            "Pressure": np.full_like(float_t, 1, dtype=np.float32),
+            "BY_GSM": np.full_like(float_t, 0, dtype=np.float32),
+            "BZ_GSM": np.full_like(float_t, 0, dtype=np.float32),
+            "Beta": np.full_like(float_t, 1, dtype=np.float32),
+            "Mgs_mach_num": np.full_like(float_t, 5, dtype=np.float32),
+            "SYM_H": np.full_like(float_t, 0, dtype=np.float32),
+        })
+
+    try:
+        index_kwargs = dict(kwargs)
+        index_kwargs.pop("return_type", None)
+        dst_vars = load_indices(
+            trange=trange, product="dst", return_type="dict", **index_kwargs,
+        )
+        values["dst"] = f_interp_vars(dst_vars)(float_t)
+    except Exception as exc:
+        if verbose:
+            print("Warning: cannot load dst data, set all default.", exc)
+        values["dst"] = np.full_like(float_t, 0, dtype=np.float32)
+
+    if scalar:
+        return {key: np.asarray(value) for key, value in values.items()}
+    return values
+
+
+@_multi_interval
 def load(mission, trange, product=None, *, probe=None, key=None, **kwargs):
     """Load a selected mission product through its source loader."""
     mission = str(mission).lower()
@@ -34,6 +160,7 @@ __all__ = [
     "get_queqiao_loc",
     "get_themis_loc",
     "load",
+    "load_sw",
     "load_pos",
     "read_spedas",
     "read_indices",
@@ -63,7 +190,7 @@ def _interpolate_position(variable, evaluation):
         raise ValueError(f"position variable must have shape (N, 3), got {values.shape}")
     normalized = dict(variable)
     normalized["y"] = values
-    interpolators = _common_utils.f_interp_vars(normalized)
+    interpolators = f_interp_vars(normalized)
     if interpolators is None:
         raise ValueError("position variable has an unsupported sample layout")
     return np.column_stack([interpolator(evaluation) for interpolator in interpolators])
@@ -87,11 +214,6 @@ def get_themis_loc(t, probe="b", coord="gsm"):
     coordinate suffix, such as ``gsm`` or ``gse``; values retain the source
     product's native position unit. A scalar time returns one ``(3,)`` vector.
     """
-    if is_multi_interval(t):
-        return np.concatenate(
-            [get_themis_loc(interval, probe=probe, coord=coord) for interval in t],
-            axis=0,
-        )
     probe = str(probe).lower()
     if probe not in {"a", "b", "c", "d", "e"}:
         raise ValueError("THEMIS probe must be one of 'a', 'b', 'c', 'd', or 'e'")
@@ -114,11 +236,6 @@ def get_mms_loc(t, probe="1", coord="gsm", *, download=None, **kwargs):
     ``[[start, end], ...]`` input is evaluated interval by interval and
     concatenated in the input order.
     """
-    if is_multi_interval(t):
-        return np.concatenate(
-            [get_mms_loc(interval, probe=probe, coord=coord, download=download, **kwargs) for interval in t],
-            axis=0,
-        )
     probe = str(probe)
     if probe not in {"1", "2", "3", "4"}:
         raise ValueError("MMS probe must be one of '1', '2', '3', or '4'")
@@ -157,11 +274,6 @@ def get_goes_loc(t, satellite, coord="gsm", *, download=None, **kwargs):
     kilometres. Nested ``[[start, end], ...]`` input is evaluated interval by
     interval and concatenated in the input order.
     """
-    if is_multi_interval(t):
-        return np.concatenate(
-            [get_goes_loc(interval, satellite, coord=coord, download=download, **kwargs) for interval in t],
-            axis=0,
-        )
     try:
         satellite = str(int(satellite))
     except (TypeError, ValueError) as exc:
@@ -199,11 +311,6 @@ def get_queqiao_loc(t, satellite=None):
     spacecraft trajectory. Nested ``[[start, end], ...]`` input is evaluated
     interval by interval and concatenated in the input order.
     """
-    if is_multi_interval(t):
-        return np.concatenate(
-            [get_queqiao_loc(interval, satellite=satellite) for interval in t],
-            axis=0,
-        )
     times, dates, _ = _position_times(t)
     frame = load_gena(
         trange=_padded_position_range(dates),
@@ -214,6 +321,7 @@ def get_queqiao_loc(t, satellite=None):
     return result[0] if times.isscalar else result
 
 
+@_multi_interval
 def load_pos(mission, trange, id=None, *, coord="gsm", **kwargs):
     """Return interpolated spacecraft positions for a supported mission.
 

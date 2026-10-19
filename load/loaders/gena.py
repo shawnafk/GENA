@@ -10,7 +10,7 @@ import pyarrow.parquet as pq
 
 from common.config import get_configured_paths
 from gena.frame import ParameterDataFrame, ParticleDataFrame
-from load.loaders.common import iter_intervals
+from load.api.public import normalize_interval
 
 
 
@@ -27,7 +27,7 @@ def load_gena(*, file=None, trange=None, product=None, columns=None):
         columns = list(dict.fromkeys(["Timestamp", *columns]))
     intervals = []
     if trange is not None:
-        intervals = [tuple(interval) for interval in iter_intervals(trange)]
+        intervals = [tuple(normalize_interval(trange))]
     inferred_product = None
     if file is not None:
         file_paths = [Path(file).expanduser()]

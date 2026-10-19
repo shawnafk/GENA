@@ -7,7 +7,7 @@ from scipy.spatial.transform import Rotation
 
 from common.frame import TimeIndexedDataFrame, TimeSeriesDataFrame
 from common.time import Time
-from libs import utils as _common_utils
+from common.interp import i_pos, i_rot
 
 __all__ = ["ParticleDataFrame", "ParameterDataFrame"]
 
@@ -146,7 +146,7 @@ class ParameterDataFrame(TimeSeriesDataFrame):
             return np.repeat(positions, len(evaluation), axis=0)
         if np.any(evaluation < source[0]) or np.any(evaluation > source[-1]):
             raise ValueError("position evaluation times are outside PDF coverage")
-        return _common_utils.i_pos(source, positions, evaluation, extrapolate=False)
+        return i_pos(source, positions, evaluation, extrapolate=False)
 
     def rot_at(self, times):
         """SLERP valid PDF attitudes at arbitrary UTC times."""
@@ -158,7 +158,7 @@ class ParameterDataFrame(TimeSeriesDataFrame):
         if np.any(evaluation < source[0]) or np.any(evaluation > source[-1]):
             raise ValueError("rotation evaluation times are outside PDF coverage")
         order = np.argsort(evaluation, kind="stable")
-        interpolated = _common_utils.i_rot(source, rotations, evaluation[order])
+        interpolated = i_rot(source, rotations, evaluation[order])
         inverse = np.empty_like(order)
         inverse[order] = np.arange(len(order))
         return interpolated[inverse]

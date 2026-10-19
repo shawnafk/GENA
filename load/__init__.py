@@ -10,6 +10,7 @@ from load.load import (
     load_spedas,
     load,
     load_pos,
+    load_sw,
 )
 from load.api.indices import parse_indices, read_indices
 from load.api.spedas import parse_spedas, read_spedas
@@ -21,6 +22,7 @@ __all__ = [
     "get_queqiao_loc",
     "load",
     "load_pos",
+    "load_sw",
     "load_gena",
     "load_indices",
     "load_spedas",

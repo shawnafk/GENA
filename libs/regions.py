@@ -14,7 +14,7 @@ from collections.abc import Callable
 import numpy as np
 import pandas as pd
 
-from libs import utils as cu
+from common.time import Time as _Time
 from common.frame import TimeSeriesDataFrame
 
 
@@ -139,7 +139,7 @@ def classify_liuzzo(
         max_gap=max_gap,
     )
     time = esa["Datetime"]
-    t = cu.Time(time).to_timestamp()
+    t = _Time(time).to_timestamp()
     pos = _evaluate_position(pos_gsm, t)
     b = fgm[b_columns].to_numpy(dtype=float)
     bmag = np.linalg.norm(b, axis=1)
@@ -257,7 +257,7 @@ def classify_runov(
         max_gap=max_gap,
     )
     time = esa["Datetime"]
-    t = cu.Time(time).to_timestamp()
+    t = _Time(time).to_timestamp()
     pos = _evaluate_position(pos_gsm, t)
     ni = esa[ni_key].to_numpy(dtype=float)
     ti = esa[ti_key].to_numpy(dtype=float)
@@ -390,7 +390,7 @@ def _attach_grigorenko_reduced_esa_check(
     metrics = _grigorenko_metrics(esa_l1, esa_l2)
     if len(metrics["time"]) == 0:
         return df
-    target = cu.Time(df["time"]).to_timestamp()
+    target = _Time(df["time"]).to_timestamp()
     nearest = np.searchsorted(metrics["time"], target)
     nearest = np.clip(nearest, 1, len(metrics["time"]) - 1)
     left = nearest - 1
@@ -454,8 +454,8 @@ def _grigorenko_metrics(
         }
     l2 = esa_l2.resample_to(l2_reference, max_gap="10s")
 
-    l1_time = cu.Time(l1["Datetime"]).to_timestamp()
-    l2_time = cu.Time(l2["Datetime"]).to_timestamp()
+    l1_time = _Time(l1["Datetime"]).to_timestamp()
+    l2_time = _Time(l2["Datetime"]).to_timestamp()
     compressed = np.stack(l1[l1_key].to_numpy())
     energy = np.stack(l2[energy_key].to_numpy()).astype(float)
     omni = np.stack(l2[eflux_key].to_numpy()).astype(float)

@@ -493,7 +493,7 @@ def get_obj(ISOT,DST=0,D_p=1,beta=5,M_ms=5,B_y=0,B_z=0):
     obj['fl'] = T96_fieldlines(UT, D_p, DST, B_y, B_z)
     return obj
 
-from libs.environment import sw_keys
+from load import load_sw
 # ---------------------------------------------------------------------------
 # Solar wind parameter interpolation  (heavily used by cross-mission analysis)
 # ---------------------------------------------------------------------------
@@ -501,7 +501,7 @@ from libs.environment import sw_keys
 def get_obj_ave(st_time,use_average_sw_params=True):
     if use_average_sw_params:
         #add verify and backup
-        sw_paras = sw_keys(st_time)
+        sw_paras = load_sw(st_time)
         ave_sw_paras = {k: np.mean(v) for k, v in sw_paras.items()}
         by = 0
         bz = ave_sw_paras['BZ_GSM']

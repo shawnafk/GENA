@@ -13,15 +13,14 @@ import numpy as np
 from scipy.interpolate import interp1d
 from scipy.spatial.transform import Slerp
 
-from libs import utils as common_utils
+from common.time import Time
 from common.config import get_configured_paths, resolve_output_path
 from common.constants import RE
 from common.coord import coord
 from gena.constants import va1, va2, va3, va4, vb1, vb2, vb3, vb4
 from gena.frame import _row_rotations
-from load import load_gena
+from load import load_gena, load_sw
 from libs import ephemeris as epms
-from libs.environment import sw_keys
 from libs.space import Bowshock, Magnetopause, T96NeutralSheet, T96_fieldlines
 
 __all__ = [
@@ -979,14 +978,14 @@ class SceneContext:
             raise ValueError('satellite_marker_size must be positive')
         cache_dates = pd.date_range(cache_start, cache_stop, freq=cadence)
         cache_dates = cache_dates.union(pd.DatetimeIndex([cache_start, cache_stop]))
-        cache_timestamps = common_utils.Time(cache_dates).to_timestamp()
+        cache_timestamps = Time(cache_dates).to_timestamp()
         orbit_start = cache_start - satellite_trajectory_padding
         orbit_stop = cache_stop + satellite_trajectory_padding
         orbit_dates = pd.date_range(orbit_start, orbit_stop, freq=cadence)
         orbit_dates = orbit_dates.union(
             pd.DatetimeIndex([orbit_start, orbit_stop])
         )
-        orbit_timestamps = common_utils.Time(orbit_dates).to_timestamp()
+        orbit_timestamps = Time(orbit_dates).to_timestamp()
 
         satellite_orbits = {}
         omitted = []
@@ -1014,7 +1013,7 @@ class SceneContext:
             )
 
         if use_space_weather:
-            raw_weather = sw_keys(cache_timestamps, download=False)
+            raw_weather = load_sw(cache_timestamps, download=False)
             space_weather = {
                 name: np.asarray(raw_weather.get(name, []), dtype=float)
                 for name in (
@@ -1053,13 +1052,13 @@ class SceneContext:
         )
 
     def _normalize_times(self, times):
-        normalized = common_utils.Time(times).datetime
+        normalized = Time(times).datetime
         if isinstance(normalized, pd.Timestamp):
             dates = pd.DatetimeIndex([normalized])
         else:
             dates = pd.DatetimeIndex(normalized)
         dates = dates.tz_localize('UTC') if dates.tz is None else dates.tz_convert('UTC')
-        timestamps = np.asarray(common_utils.Time(dates).to_timestamp(), dtype=float)
+        timestamps = np.asarray(Time(dates).to_timestamp(), dtype=float)
         if len(timestamps) == 0:
             raise ValueError('at least one scene time is required')
         if timestamps.min() < self.pose_timestamps[0] or timestamps.max() > self.pose_timestamps[-1]:
@@ -1244,7 +1243,7 @@ class SceneContext:
             raise ValueError('max_frames must be an integer of at least 2')
         timestamps = self.pose_timestamps
         if trange is not None:
-            times = common_utils.Time(trange)
+            times = Time(trange)
             if times.isscalar or len(times.datetime) != 2:
                 raise ValueError("trange must contain exactly two time values")
             start, stop = times.to_timestamp()
@@ -1287,7 +1286,7 @@ def make_scene(
     Repeated calls should pass a preloaded ``context`` to avoid repeated I/O.
     """
     if context is None:
-        normalized = common_utils.Time(time).datetime
+        normalized = Time(time).datetime
         if not isinstance(normalized, pd.Timestamp):
             raise ValueError('make_scene accepts exactly one time')
         normalized = (
@@ -1414,7 +1413,7 @@ def dumpGeo(
     else:
         if daterange is not None and dates is not None:
             raise ValueError("provide exactly one of daterange or dates")
-        time = common_utils.Time(daterange if daterange is not None else dates)
+        time = Time(daterange if daterange is not None else dates)
         if daterange is not None:
             if time.isscalar or len(time.datetime) != 2:
                 raise ValueError("day range must contain exactly two time values")

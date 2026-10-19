@@ -91,7 +91,7 @@ from plots.basic.mms import fpi, hpca
 # OMNI solar wind + indices
 from load import load_spedas
 from load import load_indices
-from libs.environment import sw_keys
+from load import load_sw
 
 # Shared infrastructure
 from common import Time, Coordinates, TimeIndexedDataFrame, TimeSeriesDataFrame
@@ -316,7 +316,7 @@ hpca = load_spedas("mms", trange, "hpca", probe=1)
 # =====================================================================
 from load import load_spedas
 from load import load_indices
-from libs.environment import sw_keys
+from load import load_sw
 
 omni_data = load_spedas("omni", trange)           # B, V, nₚ, P, β, Mach  (dict)
 ae_data  = load_indices(trange, "ae")     # AE index — 1-min cadence
@@ -326,7 +326,7 @@ context = load_indices(trange, ["sym_h", "kp", "ap_daily", "f107"], download="lo
 # solar wind parameters interpolated to an arbitrary time array
 import pandas as pd
 t = pd.date_range("2024-11-12", "2024-11-13", freq="5min")
-sw = sw_keys(t)                         # → {'Pressure', 'BY_GSM', 'BZ_GSM', …}
+sw = load_sw(t)                          # → {'Pressure', 'BY_GSM', 'BZ_GSM', …}
 ```
 
 ---

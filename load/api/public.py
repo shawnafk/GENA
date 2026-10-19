@@ -11,7 +11,16 @@ import pandas as pd
 
 from common.frame import TimeSeriesDataFrame
 from common.time import Time
-from load.loaders.common import normalize_interval
+
+
+def normalize_interval(trange):
+    """Normalize one inclusive interval to two ordered UTC timestamps."""
+    dates = Time(trange).datetime
+    if isinstance(dates, pd.Timestamp) or len(dates) != 2:
+        raise ValueError("trange must contain exactly two time values")
+    if dates[0] > dates[1]:
+        raise ValueError("trange start must not be later than end")
+    return dates
 
 
 def _time_sample_cells(values):
