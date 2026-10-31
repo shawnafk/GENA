@@ -1,7 +1,7 @@
 """One index-loading pipeline; source access and field rules live in the API."""
 
 from load.api.indices import read_indices, parse_indices
-from load.api.public import _merge_variable_dicts, assemble
+from load.api.assembly import assemble
 from common.time import Time
 
 __all__ = ["load_indices"]
@@ -24,10 +24,9 @@ def load_indices(trange, product=None, *, prefix=None, download="local_first", r
         interval, product, prefix=prefix, download=download, timeout=timeout
     )
     if return_type == "dict":
-        records = _merge_variable_dicts([data])
-        if len(records) == 1:
-            return next(iter(records.values()))
-        return records
+        if len(data) == 1:
+            return next(iter(data.values()))
+        return data
     names = list(data)
     return assemble(
         parse_indices(data, layouts),

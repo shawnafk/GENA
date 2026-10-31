@@ -3,7 +3,8 @@
 import logging
 
 from load.api.spedas import default_level, parse_spedas, read_spedas
-from load.api.public import _clip_variable_dict, _merge_variable_dicts, assemble
+from load.api.assembly import assemble
+from load.api.variables import _clip_variable_dict
 from common.time import Time
 
 logger = logging.getLogger(__name__)
@@ -46,7 +47,7 @@ def load_spedas(
     )
     raw = _clip_variable_dict(raw, interval, layouts=interval_layouts)
     if return_type == "dict":
-        return _merge_variable_dicts([raw], layouts=variable_layouts)
+        return raw
 
     parsed = parse_spedas(raw, interval_layouts)
     provenance = {

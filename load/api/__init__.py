@@ -1,4 +1,4 @@
-from .public import assemble
+from .assembly import assemble
 """Source access APIs for external observation products."""
 
 from .indices import read_indices, parse_indices
