@@ -9,7 +9,7 @@ import pyarrow.parquet as pq
 
 from common.config import get_configured_paths
 from gena.frame import ParameterDataFrame, ParticleDataFrame
-from load.api.public import normalize_interval
+from common.time import Time
 
 
 #: Columns that only engineering/PDF rows carry.
@@ -56,7 +56,7 @@ def load_gena(*, file=None, trange=None, product=None, columns=None):
         columns = list(dict.fromkeys(["Timestamp", *columns]))
     start = end = None
     if trange is not None:
-        start, end = normalize_interval(trange)
+        start, end = Time(trange).datetime
     inferred_product = None
     if file is not None:
         file_paths = [Path(file).expanduser()]

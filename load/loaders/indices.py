@@ -1,8 +1,8 @@
 """One index-loading pipeline; source access and field rules live in the API."""
 
 from load.api.indices import read_indices, parse_indices
-from load.api.public import normalize_interval
 from load.api.public import _merge_variable_dicts, assemble
+from common.time import Time
 
 __all__ = ["load_indices"]
 
@@ -19,7 +19,7 @@ def load_indices(trange, product=None, *, prefix=None, download="local_first", r
     """
     if return_type not in {"dataframe", "dict"}:
         raise ValueError("return_type must be 'dataframe' or 'dict'")
-    interval = normalize_interval(trange)
+    interval = Time(trange).datetime
     data, layouts = read_indices(
         interval, product, prefix=prefix, download=download, timeout=timeout
     )

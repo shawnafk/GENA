@@ -4,7 +4,7 @@ import logging
 
 from load.api.spedas import default_level, parse_spedas, read_spedas
 from load.api.public import _clip_variable_dict, _merge_variable_dicts, assemble
-from load.api.public import normalize_interval
+from common.time import Time
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ def load_spedas(
             raise ValueError("THEMIS ESD datatype must be a non-empty string")
     probe = ("a" if mission == "themis" else 1) if probe is None and mission != "omni" else probe
 
-    interval = normalize_interval(trange)
+    interval = Time(trange).datetime
     dates = [value.isoformat() for value in interval]
     raw, interval_layouts = read_spedas(
         mission, dates, product=product, variables=variables, probe=probe,

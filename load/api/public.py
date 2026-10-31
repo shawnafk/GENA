@@ -13,25 +13,6 @@ from common.frame import TimeSeriesDataFrame
 from common.time import Time
 
 
-def normalize_interval(trange):
-    """Convert a two-element UTC interval without validating it.
-
-    Callers pass ``[start, end]``; length and ordering are their responsibility.
-    """
-    return Time(trange).datetime
-
-
-def _time_sample_cells(values):
-    cells = np.empty(len(values), dtype=object)
-    cells[:] = [np.asarray(value).copy() for value in values]
-    return cells
-
-
-def _time_columns(times):
-    dates = Time(times).datetime
-    return {"Datetime": dates, "Timestamp": dates.asi8.astype(float) / 1e9}
-
-
 def assemble(variables, **provenance):
     """Assemble normalized variable descriptions into a time-series frame."""
     frames, metadata, used = [], {}, {"Datetime", "Timestamp"}
@@ -59,7 +40,9 @@ def assemble(variables, **provenance):
         elif kind == "vector" and values.ndim == 2 and values.shape[1] == len(names):
             columns = {column: values[:, i] for i, column in enumerate(names)}
         elif kind == "array" and values.ndim >= 2 and len(names) == 1:
-            columns = {names[0]: _time_sample_cells(values)}
+            cells = np.empty(len(values), dtype=object)
+            cells[:] = [np.asarray(value).copy() for value in values]
+            columns = {names[0]: cells}
         else:
             raise ValueError(
                 f"Variable {name!r}: {kind!r} layout {names} is incompatible with shape {values.shape}"
@@ -90,7 +73,9 @@ def assemble(variables, **provenance):
             column = spec["column"]
             if column in columns:
                 raise ValueError(f"Variable {name!r}: duplicate column {column!r}")
-            columns[column] = _time_sample_cells(samples)
+            axis_cells = np.empty(len(samples), dtype=object)
+            axis_cells[:] = [np.asarray(value).copy() for value in samples]
+            columns[column] = axis_cells
             info["axes"][axis_name] = {
                 "column": column,
                 "static": axis_time is None,
@@ -111,10 +96,12 @@ def assemble(variables, **provenance):
         metadata[name] = info
     if frames:
         joined = pd.concat(frames, axis=1, join="outer", sort=False).sort_index()
-        data = _time_columns(joined.index)
+        dates = Time(joined.index).datetime
+        data = {"Datetime": dates, "Timestamp": dates.asi8.astype(float) / 1e9}
         data.update({name: joined[name].to_numpy() for name in joined})
     else:
-        data = _time_columns([])
+        dates = Time([]).datetime
+        data = {"Datetime": dates, "Timestamp": dates.asi8.astype(float) / 1e9}
     frame = TimeSeriesDataFrame(data)
     frame.attrs = {**provenance, "variables": metadata}
     return frame
@@ -123,7 +110,7 @@ def assemble(variables, **provenance):
 
 def _clip_variable_dict(data, trange, *, layouts=None):
     """Clip decoded backend variables to an inclusive time interval."""
-    start, end = normalize_interval(trange)
+    start, end = Time(trange).datetime
     clipped = {}
     for name, variable in data.items():
         if not isinstance(variable, Mapping) or "x" not in variable or "y" not in variable:
