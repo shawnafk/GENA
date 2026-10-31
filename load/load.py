@@ -2,90 +2,31 @@
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
-from functools import wraps
-from collections.abc import Mapping
 
 from common.time import Time
 from common.interp import f_interp_vars
-from common.time import Time
 
-from load.loaders.gena import load_gena as _load_gena
-from load.loaders.indices import load_indices as _load_indices
-from load.loaders.spedas import load_spedas as _load_spedas
+from load.loaders.gena import load_gena
+from load.loaders.indices import load_indices
+from load.loaders.spedas import load_spedas
 from load.api.spedas import read_spedas
 from load.api.indices import read_indices
-from common.frame import concat
-from load.api.public import _merge_variable_dicts
 
 
-def is_multi_interval(trange):
-    """Return whether *trange* is a nested sequence of intervals."""
-    return isinstance(trange, (list, tuple)) and bool(trange) and isinstance(trange[0], (list, tuple))
+logger = logging.getLogger(__name__)
 
 
-def normalize_interval(trange):
-    """Normalize one inclusive interval to two ordered UTC timestamps."""
-    dates = Time(trange).datetime
-    if isinstance(dates, pd.Timestamp) or len(dates) != 2:
-        raise ValueError("trange must contain exactly two time values")
-    if dates[0] > dates[1]:
-        raise ValueError("trange start must not be later than end")
-    return dates
+def load_sw(t, *, trange_pad="1h", **kwargs):
+    """Load and interpolate common solar-wind and geomagnetic keys.
 
-
-def iter_intervals(trange):
-    """Normalize one interval or a nested sequence of intervals."""
-    ranges = trange if is_multi_interval(trange) else [trange]
-    return [normalize_interval(interval) for interval in ranges]
-
-
-def _merge_interval_results(results):
-    if not results:
-        return None
-    first = results[0]
-    if isinstance(first, Mapping):
-        return _merge_variable_dicts(results)
-    if isinstance(first, np.ndarray):
-        return np.concatenate(results, axis=0)
-    if isinstance(first, pd.DataFrame):
-        return concat(results)
-    return results
-
-
-def _multi_interval(func):
-    """Apply a loader or location function once per requested interval."""
-    @wraps(func)
-    def wrapped(*args, **kwargs):
-        trange = kwargs.get("trange")
-        position = None
-        if trange is None and len(args) > 1:
-            position = 1
-            trange = args[position]
-        if trange is None or not is_multi_interval(trange):
-            return func(*args, **kwargs)
-        results = []
-        for interval in iter_intervals(trange):
-            if position is None:
-                call_kwargs = dict(kwargs)
-                call_kwargs["trange"] = interval
-                results.append(func(*args, **call_kwargs))
-            else:
-                call_args = list(args)
-                call_args[position] = interval
-                results.append(func(*call_args, **kwargs))
-        return _merge_interval_results(results)
-    return wrapped
-
-
-load_gena = _multi_interval(_load_gena)
-load_indices = _multi_interval(_load_indices)
-load_spedas = _multi_interval(_load_spedas)
-
-
-def load_sw(t, *, trange_pad="1h", verbose=False, **kwargs):
-    """Load and interpolate common solar-wind and geomagnetic keys."""
+    Each OMNI key falls back independently: an unusable variable keeps its
+    documented constant while the others retain real values. Every fallback is
+    logged, so synthetic inputs are never silently mistaken for measurements.
+    """
     times = Time(t)
     scalar = times.isscalar
     datetimes = pd.DatetimeIndex([times.datetime]) if scalar else times.datetime
@@ -99,7 +40,19 @@ def load_sw(t, *, trange_pad="1h", verbose=False, **kwargs):
         (datetimes.max() + pad).isoformat(),
     ]
     namelist = ["Pressure", "BY_GSM", "BZ_GSM", "Beta", "Mgs_mach_num", "SYM_H"]
-    values = {}
+    defaults = {
+        "Pressure": 1.0,
+        "BY_GSM": 0.0,
+        "BZ_GSM": 0.0,
+        "Beta": 1.0,
+        "Mgs_mach_num": 5.0,
+        "SYM_H": 0.0,
+    }
+    values = {
+        name: np.full_like(float_t, value, dtype=np.float32)
+        for name, value in defaults.items()
+    }
+    omni_error = None
     try:
         omni_kwargs = dict(kwargs)
         omni_kwargs.pop("variables", None)
@@ -108,21 +61,29 @@ def load_sw(t, *, trange_pad="1h", verbose=False, **kwargs):
             "omni", product="hro", trange=trange,
             variables=namelist, return_type="dict", **omni_kwargs,
         )
-        for name in namelist:
-            values[name] = f_interp_vars(omni_data[name])(float_t)
-        if verbose:
-            print("load solar wind parameters successfully")
-    except Exception as exc:
-        if verbose:
-            print("Warning: cannot load omni data, set all default.", exc)
-        values.update({
-            "Pressure": np.full_like(float_t, 1, dtype=np.float32),
-            "BY_GSM": np.full_like(float_t, 0, dtype=np.float32),
-            "BZ_GSM": np.full_like(float_t, 0, dtype=np.float32),
-            "Beta": np.full_like(float_t, 1, dtype=np.float32),
-            "Mgs_mach_num": np.full_like(float_t, 5, dtype=np.float32),
-            "SYM_H": np.full_like(float_t, 0, dtype=np.float32),
-        })
+    except Exception as exc:  # loader boundary: fall back per variable below
+        omni_data = {}
+        omni_error = exc
+    resolved = []
+    for name in namelist:
+        record = omni_data.get(name)
+        if record is None:
+            continue
+        try:
+            interpolated = f_interp_vars(record)(float_t)
+        except Exception as exc:  # one bad variable must not hide the others
+            omni_error = omni_error or exc
+            continue
+        if interpolated is None or not np.any(np.isfinite(interpolated)):
+            continue
+        values[name] = np.asarray(interpolated, dtype=float)
+        resolved.append(name)
+    missing = [name for name in namelist if name not in resolved]
+    if missing:
+        logger.warning(
+            "load_sw: fallback constants used for %s (last error: %r)",
+            ", ".join(missing), omni_error,
+        )
 
     try:
         index_kwargs = dict(kwargs)
@@ -130,10 +91,12 @@ def load_sw(t, *, trange_pad="1h", verbose=False, **kwargs):
         dst_vars = load_indices(
             trange=trange, product="dst", return_type="dict", **index_kwargs,
         )
-        values["dst"] = f_interp_vars(dst_vars)(float_t)
+        interpolator = f_interp_vars(dst_vars)
+        if interpolator is None:
+            raise ValueError("dst variable has an unsupported sample layout")
+        values["dst"] = interpolator(float_t)
     except Exception as exc:
-        if verbose:
-            print("Warning: cannot load dst data, set all default.", exc)
+        logger.warning("load_sw: fallback dst=0 used (%r)", exc)
         values["dst"] = np.full_like(float_t, 0, dtype=np.float32)
 
     if scalar:
@@ -141,17 +104,62 @@ def load_sw(t, *, trange_pad="1h", verbose=False, **kwargs):
     return values
 
 
-@_multi_interval
+#: What ``product``, ``probe`` and ``key`` mean for each mission. ``key`` is
+#: the "what part of this product do I want" selector: a variable name for
+#: SPEDAS missions, a column for GENA, and the index name for indices.
+_MISSION_ROLES = {
+    "gena": {"probe": False, "key": "columns"},
+    "themis": {"probe": True, "key": "variables"},
+    "mms": {"probe": True, "key": "variables"},
+    "omni": {"probe": False, "key": "variables"},
+    "indices": {"probe": False, "key": "product"},
+}
+_MISSION_ALIASES = {"index": "indices", "kyoto": "indices"}
+
+
 def load(mission, trange, product=None, *, probe=None, key=None, **kwargs):
-    """Load a selected mission product through its source loader."""
-    mission = str(mission).lower()
-    if mission == "gena":
+    """Load one mission product through its source loader.
+
+    ``mission`` selects the role of the other arguments:
+
+    - ``gena``: ``product`` is a Parquet suffix such as ``l2s_a``; there is no
+      separate probe (it is encoded in the suffix); ``key`` selects columns
+      (``key="Energy"``) and is equivalent to ``columns=[...]``.
+    - ``themis`` / ``mms``: ``product`` is the instrument product (``esa``,
+      ``fpi``, ...), ``probe`` is the spacecraft id (``b``, ``1``, ...), and
+      ``key`` selects variables (``key="peir_flux"``) instead of the product's
+      default list; it is equivalent to ``variables=[...]``.
+    - ``omni``: ``product`` defaults to ``hro``, there is no probe, and
+      ``key`` selects variables.
+    - ``indices``: ``product`` (or ``key``) is the index name (``dst``,
+      ``ae``, ``kp``, ...); there is no probe or instrument level.
+
+    Use ``key`` for a short selection and ``variables``/``columns`` when the
+    explicit loader-style name is clearer; passing both is rejected.
+    """
+    name = _MISSION_ALIASES.get(str(mission).lower(), str(mission).lower())
+    role = _MISSION_ROLES.get(name)
+    if role is None:
+        choices = ", ".join(sorted(_MISSION_ROLES))
+        raise ValueError(f"mission must be one of {choices}")
+    if not role["probe"] and probe is not None:
+        raise ValueError(f"{name} does not accept probe")
+    if key is not None:
+        if role["key"] == "variables":
+            if "variables" in kwargs:
+                raise ValueError("pass either key or variables, not both")
+            kwargs["variables"] = [key] if isinstance(key, str) else list(key)
+        elif role["key"] == "columns":
+            if "columns" in kwargs:
+                raise ValueError("pass either key or columns, not both")
+            kwargs["columns"] = [key] if isinstance(key, str) else list(key)
+        elif product is None:
+            product = key
+    if name == "gena":
         return load_gena(trange=trange, product=product, **kwargs)
-    if mission in {"themis", "mms", "omni"}:
-        return load_spedas(mission, trange, product, probe=probe, **kwargs)
-    if mission in {"indices", "index", "kyoto"}:
-        return load_indices(trange, product=key or product, **kwargs)
-    raise ValueError("mission must be one of 'gena', 'themis', 'mms', 'omni', or 'indices'")
+    if name in {"themis", "mms", "omni"}:
+        return load_spedas(name, trange, product, probe=probe, **kwargs)
+    return load_indices(trange, product=product, **kwargs)
 
 
 __all__ = [
@@ -232,9 +240,7 @@ def get_mms_loc(t, probe="1", coord="gsm", *, download=None, **kwargs):
     """Interpolate an MMS MEC position at arbitrary UTC times.
 
     MMS MEC position variables are named ``mmsN_mec_r_COORD``. The returned
-    values retain the MEC product's native unit, normally kilometres. Nested
-    ``[[start, end], ...]`` input is evaluated interval by interval and
-    concatenated in the input order.
+    values retain the MEC product's native unit, normally kilometres.
     """
     probe = str(probe)
     if probe not in {"1", "2", "3", "4"}:
@@ -271,8 +277,7 @@ def get_goes_loc(t, satellite, coord="gsm", *, download=None, **kwargs):
 
     ``satellite`` is the GOES spacecraft number. Orbit vectors are loaded
     from pySPEDAS and retain the ephemeris product's native unit, normally
-    kilometres. Nested ``[[start, end], ...]`` input is evaluated interval by
-    interval and concatenated in the input order.
+    kilometres.
     """
     try:
         satellite = str(int(satellite))
@@ -308,8 +313,7 @@ def get_queqiao_loc(t, satellite=None):
     The PDF position columns are Moon-relative MJ2000 coordinates in metres.
     ``satellite`` is accepted for symmetry with the other mission helpers and
     is currently ignored because the configured PDF contains one Queqiao
-    spacecraft trajectory. Nested ``[[start, end], ...]`` input is evaluated
-    interval by interval and concatenated in the input order.
+    spacecraft trajectory.
     """
     times, dates, _ = _position_times(t)
     frame = load_gena(
@@ -321,14 +325,12 @@ def get_queqiao_loc(t, satellite=None):
     return result[0] if times.isscalar else result
 
 
-@_multi_interval
 def load_pos(mission, trange, id=None, *, coord="gsm", **kwargs):
     """Return interpolated spacecraft positions for a supported mission.
 
-    ``trange`` may be a scalar, a one-dimensional sequence of UTC times, or a
-    nested sequence of two-value intervals. Nested intervals are evaluated and
-    concatenated in input order. The result is one ``(x, y, z)`` vector for a
-    scalar and an ``(N, 3)`` array otherwise. THEMIS ids are ``a``-``e``, MMS
+    ``trange`` is a scalar time or a one-dimensional sequence of UTC times.
+    The result is one ``(x, y, z)`` vector for a scalar and an ``(N, 3)``
+    array otherwise. THEMIS ids are ``a``-``e``, MMS
     ids are ``1``-``4``, and GOES ids are spacecraft numbers. Queqiao uses the
     local GENA PDF orbit.
     """

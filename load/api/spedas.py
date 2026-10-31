@@ -50,6 +50,14 @@ THEMIS_FIELDS = {
         "modes": (), "vectors": (), "energy": (),
     },
     "esd": {"default": lambda p: ["valid", "data_quality", "bins", "eff", "eflux"], "modes": (), "vectors": (), "energy": ()},
+    # ``state`` supplies the position/velocity vectors used by get_themis_loc().
+    # The shared "{root}{mode}_{field}" rule yields th<probe>_pos_gsm etc.
+    "state": {
+        "default": lambda p: [f"th{p}_pos_gsm", f"th{p}_vel_gsm"],
+        "modes": ("pos", "vel"),
+        "vectors": ("gsm", "gse", "sm", "sel", "sse"),
+        "energy": (),
+    },
 }
 
 MMS_FIELDS = {
@@ -95,6 +103,14 @@ SPEDAS_OPTIONS = {
     },
 }
 
+#: Products that do not live at the mission's usual L2 level.
+DEFAULT_LEVELS = {"themis": {"state": "l1"}}
+
+
+def default_level(mission, product):
+    """Return the level a product is normally delivered at (default ``l2``)."""
+    return DEFAULT_LEVELS.get(str(mission).lower(), {}).get(str(product).lower(), "l2")
+
 
 def default_variables(mission, product, probe):
     table = {"themis": THEMIS_FIELDS, "mms": MMS_FIELDS, "omni": OMNI_FIELDS}[mission]
@@ -108,6 +124,8 @@ def default_variables(mission, product, probe):
 def qualify_variables(mission, product, variables, probe):
     if variables is None:
         return None
+    if isinstance(variables, str):
+        variables = [variables]
     if mission == "omni":
         return list(variables)
     if mission == "themis":
@@ -189,7 +207,18 @@ def _read_themis(trange, *, product, variables, probe, level, prefix, download, 
     return data, _variable_layouts(data, vectors=vectors, energy=energy)
 
 
-def _read_mms(trange, *, product, variables, probe, prefix, download, **kwargs):
+def _fpi_datatypes(full_names):
+    """Choose the FPI CDF groups that contain the requested variables."""
+    names = [str(name) for name in full_names]
+    groups = []
+    if any("energyspectr" in name for name in names):
+        groups.append("dis-dist")
+    if any("energyspectr" not in name for name in names):
+        groups.append("dis-moms")
+    return groups or ["dis-moms"]
+
+
+def _read_mms(trange, *, product, variables, probe, prefix, download, level="l2", **kwargs):
     from pyspedas.projects import mms as backend
 
     directory = _configured_spedas_dir(prefix) + "/mms_data/"
@@ -204,11 +233,15 @@ def _read_mms(trange, *, product, variables, probe, prefix, download, **kwargs):
     stem = f"mms{probe}_dis_" if product == "fpi" else f"mms{probe}_hpca_"
     for name in names:
         full_names.append(name if str(name).startswith("mms") else stem + str(name))
+    datatype = kwargs.pop("datatype", None)
+    if product == "fpi" and datatype is None:
+        datatype = _fpi_datatypes(full_names)
 
     def call(no_update):
         common = dict(
             trange=trange,
             probe=str(probe),
+            level=level,
             spdf=False,
             no_update=no_update,
             notplot=True,
@@ -217,7 +250,7 @@ def _read_mms(trange, *, product, variables, probe, prefix, download, **kwargs):
             **kwargs,
         )
         if product == "fpi":
-            return backend.mms_load_fpi(datatype="dis-moms", **common) or {}
+            return backend.mms_load_fpi(datatype=datatype, **common) or {}
         return backend.mms_load_hpca(**common) or {}
 
     if download in (False, "offline"):
@@ -292,7 +325,7 @@ def read_spedas(
     product=None,
     variables=None,
     probe=None,
-    level="l2",
+    level=None,
     prefix=None,
     download=None,
     variable_layouts=None,
@@ -320,6 +353,8 @@ def read_spedas(
     if product not in options["products"]:
         choices = ", ".join(repr(name) for name in options["products"])
         raise ValueError(f"unsupported {key} product {product!r}; choose one of {choices}")
+    if level is None:
+        level = default_level(key, product)
     if options["probes"]:
         probe = options["default_probe"] if probe is None else str(probe).lower()
         if probe not in options["probes"]:
@@ -340,7 +375,7 @@ def read_spedas(
     elif key == "mms":
         data, layouts = _read_mms(
             trange, product=product, variables=variables, probe=probe,
-            prefix=prefix, download=download, **kwargs,
+            level=level, prefix=prefix, download=download, **kwargs,
         )
     elif key == "omni":
         data, layouts = _read_omni(

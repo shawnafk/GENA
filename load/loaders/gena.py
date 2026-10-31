@@ -4,13 +4,42 @@ from __future__ import annotations
 from pathlib import Path
 import re
 
-import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 
 from common.config import get_configured_paths
 from gena.frame import ParameterDataFrame, ParticleDataFrame
 from load.api.public import normalize_interval
+
+
+#: Columns that only engineering/PDF rows carry.
+_ENGINEERING_MARKERS = {"MJ2000_Star_X", "MJ2000_Star_Y", "MJ2000_Star_Z"}
+#: Columns that identify particle-event rows, including L1A TDC channels.
+_EVENT_MARKERS = {"TX_1s", "TX_2s", "TY_1s", "TY_2s", "X1", "Y1", "Tof", "EP"}
+
+
+def _frame_type(product, columns):
+    """Choose the frame class from the declared product and the actual columns."""
+    if product == "pdf":
+        return ParameterDataFrame
+    present = set(columns)
+    if _ENGINEERING_MARKERS <= present and not (_EVENT_MARKERS & present):
+        return ParameterDataFrame
+    return ParticleDataFrame
+
+
+def _provenance(product):
+    """Split a GENA product suffix into level and probe metadata."""
+    if not product:
+        return {"source": "gena", "product": None, "level": None, "probe": None}
+    if product[-2:] in {"_a", "_b"}:
+        return {
+            "source": "gena",
+            "product": product,
+            "level": product[:-2],
+            "probe": product[-1],
+        }
+    return {"source": "gena", "product": product, "level": product, "probe": None}
 
 
 
@@ -25,9 +54,9 @@ def load_gena(*, file=None, trange=None, product=None, columns=None):
         raise ValueError("product is required with trange")
     if columns is not None:
         columns = list(dict.fromkeys(["Timestamp", *columns]))
-    intervals = []
+    start = end = None
     if trange is not None:
-        intervals = [tuple(normalize_interval(trange))]
+        start, end = normalize_interval(trange)
     inferred_product = None
     if file is not None:
         file_paths = [Path(file).expanduser()]
@@ -41,7 +70,6 @@ def load_gena(*, file=None, trange=None, product=None, columns=None):
         filename_pattern = re.compile(rf"(\d{{8}})_{re.escape(product)}\.pqt")
         requested_days = {
             day.strftime("%Y%m%d")
-            for start, end in intervals
             for day in pd.date_range(start.floor("D"), end.floor("D"), freq="D")
         }
         file_paths = []
@@ -53,13 +81,10 @@ def load_gena(*, file=None, trange=None, product=None, columns=None):
         file_paths.sort()
     effective_product = product or inferred_product
     filters = None
-    if intervals:
+    if trange is not None:
         filters = [
-            [
-                ("Timestamp", ">=", start.timestamp()),
-                ("Timestamp", "<=", end.timestamp()),
-            ]
-            for start, end in intervals
+            ("Timestamp", ">=", start.timestamp()),
+            ("Timestamp", "<=", end.timestamp()),
         ]
     frames = []
     schema_columns = None
@@ -82,13 +107,12 @@ def load_gena(*, file=None, trange=None, product=None, columns=None):
         if frames
         else pd.DataFrame(columns=list(columns or ["Timestamp"]))
     )
-    if intervals and not result.empty:
-        mask = np.zeros(len(result), dtype=bool)
-        for start, end in intervals:
-            mask |= result["Timestamp"].between(
+    if trange is not None and not result.empty:
+        result = result.loc[
+            result["Timestamp"].between(
                 start.timestamp(), end.timestamp(), inclusive="both"
             )
-        result = result.loc[mask]
+        ]
     if not result.empty:
         if effective_product == "pdf":
             result = result.drop_duplicates(subset=["Timestamp"], keep="first")
@@ -106,8 +130,9 @@ def load_gena(*, file=None, trange=None, product=None, columns=None):
     result["Datetime"] = pd.to_datetime(
         result["Timestamp"].to_numpy(dtype=float), unit="s", utc=True
     ).tz_localize(None)
-    frame_type = ParameterDataFrame if effective_product == "pdf" else ParticleDataFrame
-    return frame_type(result)
+    frame = _frame_type(effective_product, result.columns)(result)
+    frame.attrs.update(_provenance(effective_product))
+    return frame
 
 
 

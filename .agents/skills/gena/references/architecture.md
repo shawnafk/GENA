@@ -142,21 +142,18 @@ from common.config import configure
 paths = configure(file_base="/data/ENA")
 ```
 
-GENA supports daily discovery, multi-interval discovery, and direct files:
+GENA supports daily discovery and direct files:
 
 ```python
 from load import load_gena
 
 l2 = load_gena(trange=["2025-03-12", "2025-03-13"], product="l2_a")
-several = load_gena(
-    trange=[["2025-03-12", "2025-03-13"], ["2025-11-03", "2025-11-04"]],
-    product="l2g_a",
-)
 one_file = load_gena(file="/data/20250312_l2_a.pqt")
 ```
 
 Product suffixes are exact: `pdf`, `l1a_a/b`, `l1b_a/b`, `l2_a/b`, soft
 `l2s_a/b`, and strict+spatial golden `l2g_a/b`.
+`load(mission, trange, product, *, probe=..., key=...)` dispatches by mission: `product` is a GENA Parquet suffix or a SPEDAS instrument product; `probe` is accepted only by THEMIS/MMS (GENA encodes it in the suffix, OMNI and indices have none); `key` selects a subset and maps to `variables` for THEMIS/MMS/OMNI, `columns` for GENA, and the index product for indices. Every loader accepts one inclusive interval; request several intervals by calling it once per interval.
 
 Mission loaders:
 
@@ -189,7 +186,10 @@ reads use the non-SPDF local-file backend and `notplot=True`, so an offline call
 neither queries the SPDF index nor fills the pytplot registry.
 
 THEMIS defaults cover reduced ion/electron ESA (`peir/peer`), full ion/electron
-SST (`psif/psef`), ion/electron moments (`peim/peem`), and spin-resolution FGM.
+SST (`psif/psef`), ion/electron moments (`peim/peem`), spin-resolution FGM, and
+the L1 `state` product. `state` is the position/velocity source behind
+`get_themis_loc()` and `load_pos("themis", ...)`, and its default level is `l1`
+rather than `l2`; pass an explicit `level=` only for products that offer several.
 Pass `variables=[...]` to replace the relevant default list; probe prefixes are
 optional in these user-supplied names. Use the shared `variables=` argument for explicit field selection.
 THEMIS ESD is a separate L2-only ESA distribution product. Call `load_spedas("themis", ..., "esd", datatype="peif")` for full-mode ion distributions; it defaults to the CDF-native `valid`, `data_quality`, `bins`, `eff`, and `eflux` variables. ESD arrays retain their three-dimensional `(time, energy-channel, solid-angle-bin)` values in `TimeSeriesDataFrame` cells, while pySPEDAS channel axes `v1`/`v2` are preserved as `<variable>_v1`/`<variable>_v2` companion array columns. Pass `return_type="dict"` to retain the direct pySPEDAS-style `x`/`y`/`v1`/`v2` dictionaries.
@@ -200,6 +200,10 @@ NASA archive hosts; if another configured proxy returns no data, the loader
 retries those hosts once with a direct connection.
 Calling the index loader without ``product`` loads AE, AL, and AU into one
 outer-joined frame; explicit strings still select individual index products.
+Multi-interval requests merge dictionary output into one flat `x`/`y` record
+for a single product, matching the single-interval shape. MMS requests forward
+their `level` to the backend and derive FPI `datatype` from the requested
+variables (`energyspectr_*` selects `dis-dist`, otherwise `dis-moms`).
 
 THEMIS, MMS, OMNI, and index calls can download data. Do not trigger remote I/O
 during a code-only review. Use existing local data or mocks for tests unless the
@@ -308,4 +312,4 @@ TimeIndexedDataFrame owns UTC normalization, selection, interval splitting, plot
 
 `load/api/indices.py` owns Kyoto HAPI AE/Dst/SYM/ASY and GFZ Kp/ap/Ap/SN/F10.7 access, field definitions, cache and download policy, scalar decoding, and source metadata. `read_indices()` returns `(data, layouts)` and `parse_indices()` creates structured variables. `load/loaders/indices.py` owns one `load_indices()` pipeline; it does not contain per-product loading wrappers. Default products are AE/AL/AU; `prefix` specifies the cache root and `download=False` is strictly offline, `"local_first"` reuses cache and fetches missing months, and `"refresh"` replaces validated monthly JSON. Source times are retained: Kyoto Dst at HH:29:30, GFZ daily labels at midnight rather than an invented noon; ap and daily Ap retain index units of 2 nT. Single-product dictionary output remains a flat x/y record. The old dst2 alias and text-cache/save_folder interface are replaced by best-available dst and the shared prefix/download interface. See `load/api/indices.md` for products and examples.
 
-The current `load/load.py` facade imports the source loaders from `load/loaders` and read/parse APIs from `load/api`. `get_themis_loc()` is defined in the facade itself with explicit NumPy, pandas, Time, and interpolation dependencies. The facade and package initializer no longer import or export the removed `esa_mode2_angles`, `themis_decompress`, or `read_themis_cdf` helpers.
+The current `load/load.py` facade imports the source loaders from `load/loaders` and read/parse APIs from `load/api`; it now also re-exports `assemble` through `load/__init__`. `get_themis_loc()` and the other `get_*_loc()` helpers are defined in the facade and accept a scalar or one-dimensional time sequence. The facade and package initializer no longer import or export the removed `esa_mode2_angles`, `themis_decompress`, or `read_themis_cdf` helpers.

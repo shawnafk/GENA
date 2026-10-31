@@ -13,6 +13,7 @@ from load.load import (
     load_sw,
 )
 from load.api.indices import parse_indices, read_indices
+from load.api.public import assemble
 from load.api.spedas import parse_spedas, read_spedas
 
 __all__ = [
@@ -26,6 +27,7 @@ __all__ = [
     "load_gena",
     "load_indices",
     "load_spedas",
+    "assemble",
     "parse_indices",
     "parse_spedas",
     "read_indices",
