@@ -1,6 +1,6 @@
 import common.coord as gcd
 from common.coord import fov_to_vector, vector_to_fov
-from load import load_gena
+from load import load
 from gena.frame import ParameterDataFrame, _row_rotations
 from gena import utils as gena_utils
 from common.constants import RE, RM
@@ -278,7 +278,7 @@ def verify_point(ts_list,coord='GSM'):
     pd_date = pd.to_datetime(timestamps,unit='s').to_list()
     start = pd.to_datetime(timestamps.min(), unit="s", utc=True) - pd.Timedelta("1h")
     stop = pd.to_datetime(timestamps.max(), unit="s", utc=True) + pd.Timedelta("1h")
-    pdf = load_gena(
+    pdf = load("gena", 
         trange=[start, stop],
         product="pdf",
         columns=[

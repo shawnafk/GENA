@@ -67,7 +67,7 @@ Analysis scripts call mission loaders and `plots`. `plots.advance` composes prod
 
 See [the plotting guide](docs/plots.md) for joint-figure examples and migration details.
 
-Mission loaders are exposed as named functions from `load`; the old per-mission loader modules have been removed without aliases.
+The `load` package exports only `load`, `load_pos`, and `load_sw`; mission readers such as `load_gena` and `load_spedas` remain internal modules.
 
 ### Import Style
 
@@ -75,22 +75,18 @@ Imports follow a consistent pattern through the unified `load` package:
 
 ```python
 # GENA ENA data
-from load import load_gena
+from load import load
 from gena.frame import ParameterDataFrame, ParticleDataFrame
 from plots.basic import gena as gena_vis
 
 # THEMIS in-situ
-from load import load_spedas
 from plots.basic.themis import themis as plot_themis, flux
 from plots.basic.themis import get_ma_beta
 
 # MMS in-situ
-from load import load_spedas
 from plots.basic.mms import fpi, hpca
 
 # OMNI solar wind + indices
-from load import load_spedas
-from load import load_indices
 from load import load_sw
 
 # Shared infrastructure
@@ -110,32 +106,32 @@ Loader naming convention:
 
 | Package | Standard API | Notes |
 |---------|--------------|-------|
-| `load` | `load_gena(file=...)` or `load_gena(trange=..., product=...)` | `file` and `trange` are mutually exclusive; `product` is the parquet suffix, e.g. `pdf`, `l2_a`. |
-| `load` | `load_spedas("themis", trange, product, probe=..., download=False)`, `load_spedas("themis", trange)` | Local-only by default. Use `download=True` or `download="local_first"` to reuse local files and download missing files. |
-| `load` | `load_spedas("mms", trange, product, variables=None)`, `load_spedas("mms", trange, product)` | `product` is `fpi` or `hpca`. |
-| `load` | `load_spedas("omni", trange, product="hro", *, prefix=None, download=True, variables=None)` | Current implementation supports OMNI HRO. Set `download=False` to read local CDF files under the configured `spedas_base/omni_data/hro_1min/YYYY/`. |
-| `load` | `load_indices(trange, product)` | `product` selects Kyoto AE/Dst/SYM/ASY or GFZ Kp/ap/daily Ap/SN/F10.7. See [field list and cache options](load/api/indices.md). |
+| `load` | `load("gena", file=...)` or `load("gena", trange=..., product=...)` | `file` and `trange` are mutually exclusive; `product` is the parquet suffix, e.g. `pdf`, `l2_a`. |
+| `load` | `load("themis", trange, product, probe=..., download=False)`, `load("themis", trange)` | Local-only by default. Use `download=True` or `download="local_first"` to reuse local files and download missing files. |
+| `load` | `load("mms", trange, product, variables=None)`, `load("mms", trange, product)` | `product` is `fpi` or `hpca`. |
+| `load` | `load("omni", trange, product="hro", *, prefix=None, download=True, variables=None)` | Current implementation supports OMNI HRO. Set `download=False` to read local CDF files under the configured `spedas_base/omni_data/hro_1min/YYYY/`. |
+| `load` | `load("indices", trange, product)` | `product` selects Kyoto AE/Dst/SYM/ASY or GFZ Kp/ap/daily Ap/SN/F10.7. See [field list and cache options](load/api/indices.md). |
 
-Only the standard loader names above are public. Older mission-specific loader names are intentionally not part of the API.
+Only `load`, `load_pos`, and `load_sw` are exported. `load_gena`, `load_spedas`, `load_indices`, `read_*`, `parse_*`, and `assemble` are internal module functions.
 
 GENA uses one loader with two mutually exclusive input modes:
 
 ```python
 # Discover daily files by UTC range.
-pdf = load_gena(trange=["2024-12-03", "2024-12-04"], product="pdf")
+pdf = load("gena", trange=["2024-12-03", "2024-12-04"], product="pdf")
 
 # Read one complete file.
-pdf_file = load_gena(file="/data/20241203_pdf.pqt")
+pdf_file = load("gena", file="/data/20241203_pdf.pqt")
 ```
 
-All standard GENA and THEMIS loaders accept either one interval `[start, end]` or multiple intervals `[[start1, end1], [start2, end2], ...]`. GENA returns `ParameterDataFrame` for PDF engineering products and `ParticleDataFrame` for particle products, both with a fresh index. THEMIS, MMS, OMNI, and index loaders return `TimeSeriesDataFrame` by default; pass `return_type="dict"` when the legacy per-variable `x/y/v` representation is required.
+All loaders accept one interval `[start, end]`; request several intervals by calling the loader once per interval. GENA returns `ParameterDataFrame` for PDF engineering products and `ParticleDataFrame` for particle products, both with a fresh index. THEMIS, MMS, OMNI, and index loaders return `TimeSeriesDataFrame` by default; pass `return_type="dict"` when the legacy per-variable `x/y/v` representation is required.
 
 THEMIS network access is explicit and local-only by default:
 
 ```python
-esa = load_spedas("themis", trange, "esa", probe="b")                         # local only
-esa = load_spedas("themis", trange, "esa", probe="b", download=True)          # allow download
-esa = load_spedas("themis", trange, "esa", probe="b", download="local_first") # reuse local files and download missing files
+esa = load("themis", trange, "esa", probe="b")                         # local only
+esa = load("themis", trange, "esa", probe="b", download=True)          # allow download
+esa = load("themis", trange, "esa", probe="b", download="local_first") # reuse local files and download missing files
 ```
 
 ## Shared mission tables: `TimeIndexedDataFrame` and `TimeSeriesDataFrame`
@@ -156,7 +152,7 @@ The two loader families enter the shared contract through different adapters:
 
 ```mermaid
 flowchart LR
-    G["GENA Parquet rows<br/>Timestamp + event columns"] --> GL["load_gena"]
+    G["GENA Parquet rows<br/>Timestamp + event columns"] --> GL["load(gena)"]
     GL --> E["ParameterDataFrame or ParticleDataFrame"]
     T["THEMIS/MMS/OMNI/index variables<br/>x / y / optional v"] --> D["Product-specific loaders"]
     D --> F["TimeSeriesDataFrame"]
@@ -165,7 +161,7 @@ flowchart LR
     C --> S["Shared selection, interval splitting,<br/>concatenation, and tplot access"]
 ```
 
-The GENA path is strict: `load_gena()` rejects a Parquet file without `Timestamp`, performs product-specific sorting and duplicate handling, creates `Datetime` directly with pandas, and then constructs the product-specific frame. Pandas operations which retain `Datetime` preserve the concrete subclass through `_constructor`.
+The GENA path is strict: `load("gena", )` rejects a Parquet file without `Timestamp`, performs product-specific sorting and duplicate handling, creates `Datetime` directly with pandas, and then constructs the product-specific frame. Pandas operations which retain `Datetime` preserve the concrete subclass through `_constructor`.
 
 THEMIS and MMS declare variable layouts in their loaders, then use a private pySPEDAS adapter. OMNI HRO reads its shared `Epoch` and scalar fields independently, while indices use their own source readers. GENA Parquet uses its table columns directly. The loaders prepare ordinary column dictionaries before constructing a frame.
 
@@ -219,7 +215,7 @@ Generated L2 parquet suffixes have distinct quality meanings:
 | `l2s_a`, `l2s_b` | Soft quality selection: standard channel checks without the X/Y TOF-consistency requirement. |
 | `l2g_a`, `l2g_b` | Golden quality selection: strict checks including X/Y TOF consistency, followed by the spatial detector-window check. |
 
-The product string passed to `load_gena()` is the exact filename suffix; for example, `load_gena(trange=trange, product="l2g_a")` intentionally loads golden-filtered probe-A data rather than standard `l2_a` data.
+The product string passed to `load("gena", )` is the exact filename suffix; for example, `load("gena", trange=trange, product="l2g_a")` intentionally loads golden-filtered probe-A data rather than standard `l2_a` data.
 
 ## Filters and row selection
 
@@ -248,12 +244,12 @@ Particle pose columns are discrete values recorded on each event and are read di
 Post-processing functions live in `gena.post.statistic` and operate on ordinary `pandas.DataFrame` objects. `counts_nd()` performs the event histogramming, `counts_to_flux()` applies the common physical normalization, and `flux_e()`, `flux_t()`, and `flux_t_e()` are thin public wrappers. Event weights are constructed by the caller and passed as a one-dimensional array aligned with the rows.
 
 ```python
-from load import load_gena
+from load import load
 from gena.post import statistic as gena_stat
 import numpy as np
 import pandas as pd
 
-l2 = load_gena(trange=trange, product="l2_a")
+l2 = load("gena", trange=trange, product="l2_a")
 energy_bins = np.geomspace(1.0, 100.0, 33)
 time_bins = pd.date_range(trange[0], trange[1], freq="5min")
 weights = np.ones(len(l2))  # replace with calibrated per-event weights when available
@@ -291,37 +287,35 @@ trange = ["2024-11-12", "2024-11-13"]
 # =====================================================================
 #  GENA ENA imager
 # =====================================================================
-from load import load_gena
+from load import load
 
-pdf = load_gena(trange=trange, product="pdf")   # engineering data (ParameterDataFrame)
-l2 = load_gena(trange=trange, product="l2_a")  # science events (ParticleDataFrame)
+pdf = load("gena", trange=trange, product="pdf")   # engineering data (ParameterDataFrame)
+l2 = load("gena", trange=trange, product="l2_a")  # science events (ParticleDataFrame)
 
 # =====================================================================
 #  THEMIS in-situ  (ESA, FGM, MOM, EFI, SST)
 # =====================================================================
-from load import load_spedas
+from load import load
 
-esa, fgm, mom, sst = tuple(load_spedas("themis", trange, product, probe="b") for product in ("esa", "fgm", "mom", "sst"))
+esa, fgm, mom, sst = tuple(load("themis", trange, product, probe="b") for product in ("esa", "fgm", "mom", "sst"))
 
 # =====================================================================
 #  MMS in-situ  (FPI moments, HPCA ion composition)
 # =====================================================================
-from load import load_spedas
+from load import load
 
-fpi  = load_spedas("mms", trange, "fpi", probe=1)
-hpca = load_spedas("mms", trange, "hpca", probe=1)
+fpi  = load("mms", trange, "fpi", probe=1)
+hpca = load("mms", trange, "hpca", probe=1)
 
 # =====================================================================
 #  OMNI solar wind + geomagnetic indices
 # =====================================================================
-from load import load_spedas
-from load import load_indices
 from load import load_sw
 
-omni_data = load_spedas("omni", trange)           # B, V, nₚ, P, β, Mach  (dict)
-ae_data  = load_indices(trange, "ae")     # AE index — 1-min cadence
-dst_data = load_indices(trange, "dst")    # Dst hourly, source timestamps at HH:29:30
-context = load_indices(trange, ["sym_h", "kp", "ap_daily", "f107"], download="local_first")
+omni_data = load("omni", trange)           # B, V, nₚ, P, β, Mach  (dict)
+ae_data  = load("indices", trange, "ae")     # AE index — 1-min cadence
+dst_data = load("indices", trange, "dst")    # Dst hourly, source timestamps at HH:29:30
+context = load("indices", trange, ["sym_h", "kp", "ap_daily", "f107"], download="local_first")
 
 # solar wind parameters interpolated to an arbitrary time array
 import pandas as pd

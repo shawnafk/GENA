@@ -21,7 +21,7 @@ from plots import v3d as gena_v3d
 from plots.basic import gena as gena_vis
 from plots.advance import env
 from gena.frame import ParameterDataFrame
-from load import load_gena
+from load import load
 
 from .project import get_frame, get_ray, get_spacecraft_pos
 
@@ -349,9 +349,9 @@ def observation_summary(
     prob = normalize_probe(prob)
     periods = normalize_report_times(time)
     output_dir = resolve_output_path(output_dir)
-    pdf = concat([load_gena(trange=list(period), product="pdf") for period in periods])
+    pdf = concat([load("gena", trange=list(period), product="pdf") for period in periods])
     ena = concat([
-        load_gena(trange=list(period), product=f"{ena_product}_{prob}")
+        load("gena", trange=list(period), product=f"{ena_product}_{prob}")
         for period in periods
     ])
     summary = build_observation_summary(
@@ -423,7 +423,7 @@ def load_products(period, prob):
         "l2g": f"l2g_{prob}",
     }
     return {
-        name: load_gena(trange=interval, product=product)
+        name: load("gena", trange=interval, product=product)
         for name, product in product_names.items()
     }
 

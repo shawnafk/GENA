@@ -130,8 +130,3 @@ def test_gena_frame_type_follows_data(tmp_path):
 
 # ---------------------------------------------------------------------------
 # Documented facade exports
-# ---------------------------------------------------------------------------
-def test_assemble_is_exported():
-    from load import assemble
-
-    assert callable(assemble)

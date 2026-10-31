@@ -48,27 +48,29 @@ Each variable description passed to :func:`assemble` is stored as ``name -> desc
 GENA Parquet products are the exception to the parser/assembler path. Particle products contain independent event rows and parameter products already have a table layout, so :func:`load_gena` constructs their specialized frame classes directly.
 """
 
-THEMIS, MMS, and OMNI use the shared loading pipeline in `load.loaders.spedas.load_spedas()`. The public functions in `load.load` dispatch one normalized interval to each source loader. Only `load_spedas()` is exposed as the SPEDAS loader; mission-specific alignment and scientific helpers remain in the same module. GENA and indices retain separate source loaders.
+THEMIS, MMS, and OMNI use the shared internal pipeline in `load.loaders.spedas.load_spedas()`. The `load` package exports only `load`, `load_pos`, and `load_sw`; the mission readers, `read_*`, `parse_*`, and `assemble` described here are internal module functions. The public entry for these missions is `load(mission, ...)`; `load_spedas()` and mission-specific alignment helpers remain internal. GENA and indices retain separate source loaders.
 
-The sole loading entrypoint is `load_spedas(mission, trange, product, ...)`. Mission-specific public wrappers and intermediate product-loading functions have been removed. All missions use `read_spedas()` followed by clipping, `parse_spedas()`, and `assemble()`. Dictionary output retains backend variable names and native axes. Default download policies are configured in `SPEDAS_OPTIONS` and resolved by the read API.
+The internal loading entrypoint is `load_spedas(mission, trange, product, ...)`. Mission-specific public wrappers and intermediate product-loading functions have been removed. All missions use `read_spedas()` followed by clipping, `parse_spedas()`, and `assemble()`. Dictionary output retains backend variable names and native axes. Default download policies are configured in `SPEDAS_OPTIONS` and resolved by the read API.
 
-The indices path mirrors SPEDAS: `read_indices(trange, product, ...)` returns records and layouts, `parse_indices(data, layouts)` produces structured variables, and `load.loaders.indices.load_indices()` handles one normalized interval, assembly, and output selection. Each call handles one interval; call the loader once per interval. `INDICES_FIELDS` declares Kyoto AE/Dst/SYM/ASY and GFZ Kp/ap/Ap/SN/F10.7 fields. All products share offline/local-first/refresh policies and monthly JSON caching.
+The indices path mirrors SPEDAS: `read_indices(trange, product, ...)` returns records and layouts, `parse_indices(data, layouts)` produces structured variables, and `load.loaders.indices.load_indices()` handles one normalized interval, assembly, and output selection. `INDICES_FIELDS` declares Kyoto AE/Dst/SYM/ASY and GFZ Kp/ap/Ap/SN/F10.7 fields. All products share offline/local-first/refresh policies and monthly JSON caching.
 
 
 # Indices API and loader
 
-The indices path follows the same layers as SPEDAS: `read_indices()` returns `(data, layouts)`, `parse_indices(data, layouts)` returns structured variables, and `load_indices()` handles assembly and the requested return type. Field definitions, URLs, network access, cache handling, fill values, units, and source metadata belong to `load/api/indices.py`; the loader does not implement source-specific downloads or parsers.
+The indices path follows the same layers as SPEDAS: `read_indices()` returns `(data, layouts)`, `parse_indices(data, layouts)` returns structured variables, and `load("indices", ...)` handles assembly and the requested return type. Field definitions, URLs, network access, cache handling, fill values, units, and source metadata belong to `load/api/indices.py`; the loader does not implement source-specific downloads or parsers.
 
 ```python
-from load import read_indices, parse_indices, assemble, load_indices
+from load import load
+from load.api.indices import parse_indices, read_indices
+from load.api.public import assemble
 
 trange = ["2025-01-01", "2025-01-02"]
 data, layouts = read_indices(trange, ["ae", "dst", "f107"])
 variables = parse_indices(data, layouts)
 frame = assemble(variables, source="indices")
 
-# The complete loading path, including multiple intervals when needed.
-frame = load_indices(trange, ["ae", "al", "au", "dst", "kp", "f107"])
+# The complete public loading path.
+frame = load("indices", trange, ["ae", "al", "au", "dst", "kp", "f107"])
 ```
 
 ## Fields
@@ -104,8 +106,8 @@ Kyoto's best-available datasets select the highest available processing level fo
 The default is `"local_first"`. Existing monthly files are snapshots, including the current month; use `"refresh"` when new samples or processing revisions are needed. Failed requests do not erase existing cache files. This JSON cache replaces the previous ad hoc Kyoto text/GFZ-table cache; `prefix` replaces the old `save_folder` option. The old `dst2` fallback name is removed: the Kyoto `dst` best-available dataset already selects the available processing version.
 
 ```python
-cached = load_indices(trange, "dst", prefix="/data/space-weather", download=False)
-updated = load_indices(trange, "dst", prefix="/data/space-weather", download="refresh")
+cached = load("indices", trange, "dst", prefix="/data/space-weather", download=False)
+updated = load("indices", trange, "dst", prefix="/data/space-weather", download="refresh")
 ```
 
 Default output is `TimeSeriesDataFrame`. With `return_type="dict"`, a single selected product returns its `x`/`y` record, including units and source attributes; multiple products return a name-to-record mapping. Native times, units, source field names, citation identifiers, timestamp conventions, and month-specific processing metadata are retained in the structured variable attributes and resulting frame metadata.

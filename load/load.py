@@ -13,12 +13,69 @@ from common.interp import f_interp_vars
 from load.loaders.gena import load_gena
 from load.loaders.indices import load_indices
 from load.loaders.spedas import load_spedas
-from load.api.spedas import read_spedas
-from load.api.indices import read_indices
 
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["load", "load_pos", "load_sw"]
+
+
+#: What ``product``, ``probe`` and ``key`` mean for each mission. ``key`` is
+#: the "what part of this product do I want" selector: a variable name for
+#: SPEDAS missions, a column for GENA, and the index name for indices.
+_MISSION_ROLES = {
+    "gena": {"probe": False, "key": "columns"},
+    "themis": {"probe": True, "key": "variables"},
+    "mms": {"probe": True, "key": "variables"},
+    "omni": {"probe": False, "key": "variables"},
+    "indices": {"probe": False, "key": "product"},
+}
+_MISSION_ALIASES = {"index": "indices", "kyoto": "indices"}
+
+
+def load(mission, trange, product=None, *, probe=None, key=None, **kwargs):
+    """Load one mission product through its source loader.
+
+    ``mission`` selects the role of the other arguments:
+
+    - ``gena``: ``product`` is a Parquet suffix such as ``l2s_a``; there is no
+      separate probe (it is encoded in the suffix); ``key`` selects columns
+      (``key="Energy"``) and is equivalent to ``columns=[...]``.
+    - ``themis`` / ``mms``: ``product`` is the instrument product (``esa``,
+      ``fpi``, ...), ``probe`` is the spacecraft id (``b``, ``1``, ...), and
+      ``key`` selects variables (``key="peir_flux"``) instead of the product's
+      default list; it is equivalent to ``variables=[...]``.
+    - ``omni``: ``product`` defaults to ``hro``, there is no probe, and
+      ``key`` selects variables.
+    - ``indices``: ``product`` (or ``key``) is the index name (``dst``,
+      ``ae``, ``kp``, ...); there is no probe or instrument level.
+
+    Use ``key`` for a short selection and ``variables``/``columns`` when the
+    explicit loader-style name is clearer; passing both is rejected.
+    """
+    name = _MISSION_ALIASES.get(str(mission).lower(), str(mission).lower())
+    role = _MISSION_ROLES.get(name)
+    if role is None:
+        choices = ", ".join(sorted(_MISSION_ROLES))
+        raise ValueError(f"mission must be one of {choices}")
+    if not role["probe"] and probe is not None:
+        raise ValueError(f"{name} does not accept probe")
+    if key is not None:
+        if role["key"] == "variables":
+            if "variables" in kwargs:
+                raise ValueError("pass either key or variables, not both")
+            kwargs["variables"] = [key] if isinstance(key, str) else list(key)
+        elif role["key"] == "columns":
+            if "columns" in kwargs:
+                raise ValueError("pass either key or columns, not both")
+            kwargs["columns"] = [key] if isinstance(key, str) else list(key)
+        elif product is None:
+            product = key
+    if name == "gena":
+        return load_gena(trange=trange, product=product, **kwargs)
+    if name in {"themis", "mms", "omni"}:
+        return load_spedas(name, trange, product, probe=probe, **kwargs)
+    return load_indices(trange, product=product, **kwargs)
 
 def load_sw(t, *, trange_pad="1h", **kwargs):
     """Load and interpolate common solar-wind and geomagnetic keys.
@@ -104,71 +161,6 @@ def load_sw(t, *, trange_pad="1h", **kwargs):
     return values
 
 
-#: What ``product``, ``probe`` and ``key`` mean for each mission. ``key`` is
-#: the "what part of this product do I want" selector: a variable name for
-#: SPEDAS missions, a column for GENA, and the index name for indices.
-_MISSION_ROLES = {
-    "gena": {"probe": False, "key": "columns"},
-    "themis": {"probe": True, "key": "variables"},
-    "mms": {"probe": True, "key": "variables"},
-    "omni": {"probe": False, "key": "variables"},
-    "indices": {"probe": False, "key": "product"},
-}
-_MISSION_ALIASES = {"index": "indices", "kyoto": "indices"}
-
-
-def load(mission, trange, product=None, *, probe=None, key=None, **kwargs):
-    """Load one mission product through its source loader.
-
-    ``mission`` selects the role of the other arguments:
-
-    - ``gena``: ``product`` is a Parquet suffix such as ``l2s_a``; there is no
-      separate probe (it is encoded in the suffix); ``key`` selects columns
-      (``key="Energy"``) and is equivalent to ``columns=[...]``.
-    - ``themis`` / ``mms``: ``product`` is the instrument product (``esa``,
-      ``fpi``, ...), ``probe`` is the spacecraft id (``b``, ``1``, ...), and
-      ``key`` selects variables (``key="peir_flux"``) instead of the product's
-      default list; it is equivalent to ``variables=[...]``.
-    - ``omni``: ``product`` defaults to ``hro``, there is no probe, and
-      ``key`` selects variables.
-    - ``indices``: ``product`` (or ``key``) is the index name (``dst``,
-      ``ae``, ``kp``, ...); there is no probe or instrument level.
-
-    Use ``key`` for a short selection and ``variables``/``columns`` when the
-    explicit loader-style name is clearer; passing both is rejected.
-    """
-    name = _MISSION_ALIASES.get(str(mission).lower(), str(mission).lower())
-    role = _MISSION_ROLES.get(name)
-    if role is None:
-        choices = ", ".join(sorted(_MISSION_ROLES))
-        raise ValueError(f"mission must be one of {choices}")
-    if not role["probe"] and probe is not None:
-        raise ValueError(f"{name} does not accept probe")
-    if key is not None:
-        if role["key"] == "variables":
-            if "variables" in kwargs:
-                raise ValueError("pass either key or variables, not both")
-            kwargs["variables"] = [key] if isinstance(key, str) else list(key)
-        elif role["key"] == "columns":
-            if "columns" in kwargs:
-                raise ValueError("pass either key or columns, not both")
-            kwargs["columns"] = [key] if isinstance(key, str) else list(key)
-        elif product is None:
-            product = key
-    if name == "gena":
-        return load_gena(trange=trange, product=product, **kwargs)
-    if name in {"themis", "mms", "omni"}:
-        return load_spedas(name, trange, product, probe=probe, **kwargs)
-    return load_indices(trange, product=product, **kwargs)
-
-
-__all__ = [
-    "load",
-    "load_sw",
-    "load_pos",
-    "read_spedas",
-    "read_indices",
-]
 
 
 # Explicit convenience operations using the public loaders.

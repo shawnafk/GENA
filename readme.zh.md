@@ -86,22 +86,18 @@ flowchart TD
 
 ```python
 # GENA ENA 数据
-from load import load_gena
+from load import load
 from gena.frame import ParameterDataFrame, ParticleDataFrame
 from plots.basic import gena as gena_vis
 from gena.post import statistic as gena_stat
 
 # THEMIS 原位探测数据
-from load import load_spedas
 from plots.basic.themis import themis as plot_themis, flux, get_ma_beta
 
 # MMS 原位探测数据
-from load import load_spedas
 from plots.basic.mms import fpi, hpca
 
 # OMNI 太阳风和地磁指数
-from load import load_spedas
-from load import load_indices
 from load import load_sw
 
 # 共享基础设施
@@ -119,11 +115,11 @@ from libs import ephemeris, plasma, space
 
 | 包 | 标准 API | 说明 |
 |----|----------|------|
-| `load` | `load_gena(file=...)` 或 `load_gena(trange=..., product=...)` | `file` 与 `trange` 互斥；`product` 是 Parquet 文件名后缀，例如 `pdf`、`l2_a` |
-| `load` | `load_spedas("themis", trange, product, variables=None, probe=..., download=False)`、`load_spedas("themis", trange, probe=...)` | 默认严格读取本地数据；支持 ESA ESD 三维分布；显式设置 `download=True` 或 `download="local_first"` 才允许联网 |
-| `load` | `load_spedas("mms", trange, product, variables=None, probe=...)`、`load_spedas("mms", trange, product, probe=...)` | `product` 为 `fpi` 或 `hpca` |
-| `load` | `load_spedas("omni", trange, product="hro", download=True, variables=None)` | 当前实现支持 OMNI HRO 1 分钟产品；`download=False` 时读取本地 CDF |
-| `load` | `load_indices(trange, product=None)` | `product` 选择 Kyoto AE/Dst/SYM/ASY 或 GFZ Kp/ap/日 Ap/SN/F10.7；省略时加载 AE/AL/AU；支持统一缓存和离线策略，详见 [indices API](load/api/indices.md) |
+| `load` | `load("gena", file=...)` 或 `load("gena", trange=..., product=...)` | `file` 与 `trange` 互斥；`product` 是 Parquet 文件名后缀，例如 `pdf`、`l2_a` |
+| `load` | `load("themis", trange, product, variables=None, probe=..., download=False)`、`load("themis", trange, probe=...)` | 默认严格读取本地数据；支持 ESA ESD 三维分布；显式设置 `download=True` 或 `download="local_first"` 才允许联网 |
+| `load` | `load("mms", trange, product, variables=None, probe=...)`、`load("mms", trange, product, probe=...)` | `product` 为 `fpi` 或 `hpca` |
+| `load` | `load("omni", trange, product="hro", download=True, variables=None)` | 当前实现支持 OMNI HRO 1 分钟产品；`download=False` 时读取本地 CDF |
+| `load` | `load("indices", trange, product=None)` | `product` 选择 Kyoto AE/Dst/SYM/ASY 或 GFZ Kp/ap/日 Ap/SN/F10.7；省略时加载 AE/AL/AU；支持统一缓存和离线策略，详见 [indices API](load/api/indices.md) |
 
 以上名称是标准公共入口。旧的任务专用加载函数不属于当前公共 API。
 
@@ -131,21 +127,21 @@ GENA 使用同一个加载器提供两种互斥的输入模式：
 
 ```python
 # 按 UTC 时间范围发现每日文件
-pdf = load_gena(trange=["2024-12-03", "2024-12-04"], product="pdf")
+pdf = load("gena", trange=["2024-12-03", "2024-12-04"], product="pdf")
 
 # 读取一个完整文件
-pdf_file = load_gena(file="/data/20241203_pdf.pqt")
+pdf_file = load("gena", file="/data/20241203_pdf.pqt")
 ```
 
-GENA 和 THEMIS 的标准加载器支持一个时间区间 `[start, end]` 或多个时间区间 `[[start1, end1], [start2, end2], ...]`。GENA 的 PDF 工参返回重新编号索引的 `ParameterDataFrame`，粒子产品返回 `ParticleDataFrame`；THEMIS、MMS、OMNI 和地磁指数加载器默认返回 `TimeSeriesDataFrame`，需要旧式逐变量 `x/y/v` 字典时可传入 `return_type="dict"`。
+所有加载器一次接受一个时间区间 `[start, end]`；需要多个区间时逐次调用。GENA 的 PDF 工参返回重新编号索引的 `ParameterDataFrame`，粒子产品返回 `ParticleDataFrame`；THEMIS、MMS、OMNI 和地磁指数加载器默认返回 `TimeSeriesDataFrame`，需要旧式逐变量 `x/y/v` 字典时可传入 `return_type="dict"`。
 
 THEMIS 默认严格使用本地数据，不会主动访问 Berkeley 远程索引：
 
 ```python
-esa = load_spedas("themis", trange, "esa", probe="b")                         # 仅本地读取
-esa = load_spedas("themis", trange, "esa", probe="b", download=True)          # 允许下载
-esa = load_spedas("themis", trange, "esa", probe="b", download="local_first") # 先检查本地，缺失时下载
-esd = load_spedas("themis", trange, "esd", probe="b", datatype="peif", download=True)  # ESA L2 三维离子分布
+esa = load("themis", trange, "esa", probe="b")                         # 仅本地读取
+esa = load("themis", trange, "esa", probe="b", download=True)          # 允许下载
+esa = load("themis", trange, "esa", probe="b", download="local_first") # 先检查本地，缺失时下载
+esd = load("themis", trange, "esd", probe="b", datatype="peif", download=True)  # ESA L2 三维离子分布
 ```
 
 ---
@@ -168,7 +164,7 @@ esd = load_spedas("themis", trange, "esd", probe="b", datatype="peif", download=
 
 ```mermaid
 flowchart LR
-    G["GENA Parquet 行<br/>Timestamp + 事件列"] --> GL["load_gena"]
+    G["GENA Parquet 行<br/>Timestamp + 事件列"] --> GL["load(gena)"]
     GL --> E["ParameterDataFrame 或 ParticleDataFrame"]
     T["THEMIS/MMS/OMNI/指数变量<br/>x / y / 可选 v"] --> D["各产品 loader"]
     D --> F["TimeSeriesDataFrame"]
@@ -177,7 +173,7 @@ flowchart LR
     C --> S["共享行选择、时间区间切分、<br/>拼接和 tplot 入口"]
 ```
 
-GENA 加载路径是严格的：`load_gena()` 拒绝缺少 `Timestamp` 的 Parquet 文件，执行与产品类型对应的排序和去重，直接用 pandas 生成 `Datetime`，再构造对应的产品类型。保留 `Datetime` 的 pandas 操作通过 `_constructor` 保留具体子类。
+GENA 加载路径是严格的：`load("gena", )` 拒绝缺少 `Timestamp` 的 Parquet 文件，执行与产品类型对应的排序和去重，直接用 pandas 生成 `Datetime`，再构造对应的产品类型。保留 `Datetime` 的 pandas 操作通过 `_constructor` 保留具体子类。
 
 THEMIS/MMS 在各自 loader 中声明变量布局，再交给私有 pySPEDAS 适配器处理。OMNI HRO 单独解释共享 `Epoch` 和标量字段；indices 使用各来源的读取逻辑；GENA Parquet 按已有表列处理。最终都生成普通的“列名 → 等长列数据”字典，再构造实例。
 
@@ -230,7 +226,7 @@ GENA 数据从原始遥测包逐级转换为科学产品：
 | `l2s_a`、`l2s_b` | Soft 质量筛选：执行标准通道检查，但不要求 X/Y TOF 一致性 |
 | `l2g_a`、`l2g_b` | Golden 质量筛选：执行包含 X/Y TOF 一致性的严格检查，并继续执行空间探测器窗口筛选 |
 
-传给 `load_gena()` 的产品字符串就是文件名的准确后缀。例如，`load_gena(trange=trange, product="l2g_a")` 加载探针 A 的 golden L2，而不是标准 `l2_a`。
+传给 `load("gena", )` 的产品字符串就是文件名的准确后缀。例如，`load("gena", trange=trange, product="l2g_a")` 加载探针 A 的 golden L2，而不是标准 `l2_a`。
 
 ---
 
@@ -276,12 +272,12 @@ subset = l2.select(rule)
 GENA 派生统计量、通量和温度诊断主要位于 `gena.post.statistic`；射线和投影几何位于 `gena.post.project`。`counts_nd()` 负责事件直方图，`counts_to_flux()` 负责统一归一化，`flux_e()`、`flux_t()` 和 `flux_t_e()` 是三个薄封装。事件权重由调用方构造，并以与数据行位置对齐的一维数组传入。
 
 ```python
-from load import load_gena
+from load import load
 from gena.post import statistic as gena_stat
 import numpy as np
 import pandas as pd
 
-l2 = load_gena(trange=trange, product="l2_a")
+l2 = load("gena", trange=trange, product="l2_a")
 energy_bins = np.geomspace(1.0, 100.0, 33)
 time_bins = pd.date_range(trange[0], trange[1], freq="5min")
 weights = np.ones(len(l2))  # 有标定结果时替换为逐事件权重
@@ -327,32 +323,30 @@ config = configure()
 trange = ["2024-11-12", "2024-11-13"]
 
 # GENA ENA 成像仪
-from load import load_gena
+from load import load
 from gena.post import statistic as gena_stat
 
-pdf = load_gena(trange=trange, product="pdf")
-l2 = load_gena(trange=trange, product="l2_a")
+pdf = load("gena", trange=trange, product="pdf")
+l2 = load("gena", trange=trange, product="l2_a")
 
 # THEMIS 原位探测数据（ESA、FGM、MOM、EFI、SST）
-from load import load_spedas
+from load import load
 
-esa, fgm, mom, sst = tuple(load_spedas("themis", trange, product, probe="b") for product in ("esa", "fgm", "mom", "sst"))
+esa, fgm, mom, sst = tuple(load("themis", trange, product, probe="b") for product in ("esa", "fgm", "mom", "sst"))
 
 # MMS 原位探测数据（FPI、HPCA）
-from load import load_spedas
+from load import load
 
-fpi = load_spedas("mms", trange, "fpi", probe=1)
-hpca = load_spedas("mms", trange, "hpca", probe=1)
+fpi = load("mms", trange, "fpi", probe=1)
+hpca = load("mms", trange, "hpca", probe=1)
 
 # OMNI 太阳风和地磁指数
-from load import load_spedas
-from load import load_indices
 from load import load_sw
 
-omni = load_spedas("omni", trange)
-auroral = load_indices(trange)          # 同时包含 AE、AL 和 AU
-dst = load_indices(trange, "dst")
-context = load_indices(trange, ["sym_h", "kp", "ap_daily", "f107"], download="local_first")
+omni = load("omni", trange)
+auroral = load("indices", trange)          # 同时包含 AE、AL 和 AU
+dst = load("indices", trange, "dst")
+context = load("indices", trange, ["sym_h", "kp", "ap_daily", "f107"], download="local_first")
 
 # 将太阳风和 Dst 环境参数插值到任意时刻
 import pandas as pd

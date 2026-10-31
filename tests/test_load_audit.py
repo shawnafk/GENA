@@ -56,7 +56,7 @@ def test_single_interval_index_dict_is_flat(monkeypatch):
         return _fake_indices_record("2024-01-01")
 
     monkeypatch.setattr(indices_loader, "read_indices", fake_read_indices)
-    record = load.load_indices(trange=TRANGE, product="dst", return_type="dict")
+    record = load_module.load_indices(trange=TRANGE, product="dst", return_type="dict")
     assert set(record) == {"x", "y", "units", "attrs"}
     assert len(calls) == 1
 
@@ -182,14 +182,8 @@ def test_empty_backend_result_is_labelled(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Public exports and GENA frame selection
+# GENA frame selection
 # ---------------------------------------------------------------------------
-def test_assemble_is_exported():
-    from load import assemble
-
-    assert callable(assemble)
-
-
 def _write_engineering_parquet(path) -> None:
     pd.DataFrame(
         {

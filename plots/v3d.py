@@ -19,7 +19,7 @@ from common.constants import RE
 from common.coord import coord
 from gena.constants import va1, va2, va3, va4, vb1, vb2, vb3, vb4
 from gena.frame import _row_rotations
-from load import load_gena, load_sw
+from load import load, load_sw
 from libs import ephemeris as epms
 from libs.space import Bowshock, Magnetopause, T96NeutralSheet, T96_fieldlines
 
@@ -918,7 +918,7 @@ class SceneContext:
         ]
         rotation_columns = ['MJ2000_q1', 'MJ2000_q2', 'MJ2000_q3']
         pose_columns = ['Timestamp', *position_columns, *rotation_columns]
-        pose = load_gena(
+        pose = load("gena", 
             trange=trange,
             product="pdf",
             columns=pose_columns,

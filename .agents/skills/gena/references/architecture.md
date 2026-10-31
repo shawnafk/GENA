@@ -28,7 +28,7 @@ analysis scripts / gena.post.export
 Keep mission modules independent. Put time, coordinates, types and configuration in `common/`, shared plotting in `plots.vis`, and scientific models in `libs/`;
 compose preloaded products in `plots.advance` and study-specific analyses in analysis scripts. Mission `vis.py` modules have been removed; product plots live in `plots.basic`, and report orchestration may call `plots`.
 
-The public loading facade lives in `load/load.py`. THEMIS, MMS, and OMNI share `load/loaders/spedas.py`: `load_spedas()` owns interval iteration, clipping, assembly, concatenation, and return-type handling, and is the only SPEDAS loading entrypoint; mission-specific loader wrappers have been removed. Their former separate loader modules have been removed. GENA and indices retain their own loader modules; the shared assembler currently lives in `load/loaders/gena.py`. `libs.regions` owns cross-mission classification; explicit column mappings allow non-THEMIS inputs. The facade exports only functions present in current API and loader modules; removed scientific helpers are not re-exported. Loader return types, download policies, configuration and units are unchanged.
+The `load` package exports only `load`, `load_pos`, and `load_sw`; the facade lives in `load/load.py`, and mission readers plus `read_*`/`parse_*`/`assemble` are module-level internals. THEMIS, MMS, and OMNI share `load/loaders/spedas.py`, which owns clipping, assembly, and return-type handling; mission-specific loader wrappers have been removed. GENA and indices retain their own loader modules; the shared assembler currently lives in `load/loaders/gena.py`. `libs.regions` owns cross-mission classification; explicit column mappings allow non-THEMIS inputs. Only `load`, `load_pos`, and `load_sw` are re-exported from the package; removed scientific helpers are not re-exported. Loader return types, download policies, configuration and units are unchanged.
 
 Shared loader-only normalization helpers live privately in `load.load`. In particular, `_clip_variable_dict()` trims backend `x`/`y` dictionaries before conversion and is not part of the `common` or `load` public API.
 
@@ -40,7 +40,7 @@ underscore. Inspect private helpers only when diagnosing their public caller.
 
 ### GENA tables
 
-`load_gena()` returns `gena.frame.ParameterDataFrame` for the PDF engineering product and `gena.frame.ParticleDataFrame` for particle products. `Timestamp` is Unix seconds; `load_gena()` creates `Datetime` directly with pandas before construction. Both types inherit the shared `common.frame.TimeIndexedDataFrame` behavior, so `Datetime` is a timezone-naive pandas `datetime64[ns]` column whose values are defined as UTC. `ParameterDataFrame` additionally inherits `TimeSeriesDataFrame`; `ParticleDataFrame` does not. Time-series consumers access the normalized time directly with `frame["Datetime"]`; source-field mapping belongs in loaders. `TimeIndexedDataFrame.__init__` requires exactly one `Datetime` column and delegates normalization to `common.time.Time`, which rejects invalid/NaT values. It never infers a missing `Datetime` from `Timestamp` or `Date` and does not automatically add `Timestamp`. Pandas column selections without `Datetime` return ordinary DataFrames; results retaining it preserve the concrete subclass. This construction check does not continuously validate in-place mutations. Plain DataFrames passed to time-series operations must also provide `Datetime`.
+`load("gena", )` returns `gena.frame.ParameterDataFrame` for the PDF engineering product and `gena.frame.ParticleDataFrame` for particle products. `Timestamp` is Unix seconds; `load("gena", )` creates `Datetime` directly with pandas before construction. Both types inherit the shared `common.frame.TimeIndexedDataFrame` behavior, so `Datetime` is a timezone-naive pandas `datetime64[ns]` column whose values are defined as UTC. `ParameterDataFrame` additionally inherits `TimeSeriesDataFrame`; `ParticleDataFrame` does not. Time-series consumers access the normalized time directly with `frame["Datetime"]`; source-field mapping belongs in loaders. `TimeIndexedDataFrame.__init__` requires exactly one `Datetime` column and delegates normalization to `common.time.Time`, which rejects invalid/NaT values. It never infers a missing `Datetime` from `Timestamp` or `Date` and does not automatically add `Timestamp`. Pandas column selections without `Datetime` return ordinary DataFrames; results retaining it preserve the concrete subclass. This construction check does not continuously validate in-place mutations. Plain DataFrames passed to time-series operations must also provide `Datetime`.
 
 Typical product columns:
 
@@ -55,7 +55,7 @@ Typical product columns:
 
 ### Other missions
 
-Product conversion belongs to `load`, never to `common.frame`. THEMIS and MMS obtain `(data, layouts)` from `load.api.spedas.read_spedas()`, whose mission-specific readers generate layouts directly using the product information already supplied for reading. Product constants (`THEMIS_FIELDS`, `MMS_FIELDS`, and `OMNI_FIELDS`), default-variable and name-qualification helpers, and layout generation all live in `load.api.spedas`; there is no separate layouts module. OMNI HRO declares scalar output and its default fields there. The public wrapper validates and dispatches, then applies layout overrides; no separate mission-dispatching layout generator is used. The consolidated `load.loaders.spedas` pipeline passes these layouts and decoded backend dictionaries through `parse_spedas()`. MMS backend names remain complete in the read API; the shared loader also preserves complete backend names. OMNI HRO decodes its shared `Epoch` and scalar fields independently; indices use `load.api.indices.read_indices()` to obtain records and layouts from Kyoto HAPI or GFZ JSON, then `parse_indices()` creates scalar descriptions. `INDICES_FIELDS` defines AE/AL/AU/AO, Dst, SYM/ASY, Kp, ap, daily Ap, sunspot number, and observed/adjusted F10.7. Source JSON is cached by UTC month under `prefix/indices`, with one request for shared Kyoto datasets. The index loader only assembles and concatenates intervals. `assemble()` mechanically joins normalized descriptions and prepares `Datetime` and `Timestamp` before constructing the frame. GENA Parquet is converted directly inside `load_gena()` and does not pass through the pySPEDAS parser or time-series assembler.
+Product conversion belongs to `load`, never to `common.frame`. THEMIS and MMS obtain `(data, layouts)` from `load.api.spedas.read_spedas()`, whose mission-specific readers generate layouts directly using the product information already supplied for reading. Product constants (`THEMIS_FIELDS`, `MMS_FIELDS`, and `OMNI_FIELDS`), default-variable and name-qualification helpers, and layout generation all live in `load.api.spedas`; there is no separate layouts module. OMNI HRO declares scalar output and its default fields there. The public wrapper validates and dispatches, then applies layout overrides; no separate mission-dispatching layout generator is used. The consolidated `load.loaders.spedas` pipeline passes these layouts and decoded backend dictionaries through `parse_spedas()`. MMS backend names remain complete in the read API; the shared loader also preserves complete backend names. OMNI HRO decodes its shared `Epoch` and scalar fields independently; indices use `load.api.indices.read_indices()` to obtain records and layouts from Kyoto HAPI or GFZ JSON, then `parse_indices()` creates scalar descriptions. `INDICES_FIELDS` defines AE/AL/AU/AO, Dst, SYM/ASY, Kp, ap, daily Ap, sunspot number, and observed/adjusted F10.7. Source JSON is cached by UTC month under `prefix/indices`, with one request for shared Kyoto datasets. The index loader only assembles and concatenates intervals. `assemble()` mechanically joins normalized descriptions and prepares `Datetime` and `Timestamp` before constructing the frame. GENA Parquet is converted directly inside `load("gena", )` and does not pass through the pySPEDAS parser or time-series assembler.
 
 Layouts explicitly specify kind, output columns, time dimension, and coordinate columns. Known product vectors may expand into components; unknown multidimensional fields remain array cells. A three-column array is never sufficient evidence for a spatial vector. Only declared energy coordinates receive an `_energy` name. THEMIS/MMS accept `variable_layouts` overrides for additional fields. pySPEDAS static one-dimensional axes and sampled multidimensional axes are handled at the backend boundary, including clipping when the channel count equals the time count.
 
@@ -93,7 +93,7 @@ Use `.agents/skills/gena/scripts/api_query.py` before relying on this static map
 | Interpolate position/rotation/data | `libs.utils` | `i_pos`, `i_rot`, `f_interp_vars` |
 | Transform coordinates | `common.coord` | `Coordinates.to`, `Coordinates.resample_at`, `transform_vectors`; legacy `coord` remains available |
 | Vector geometry and rotations | `common.coord` | `angle_between`, `angle_to_plane`, `vector_to_fov`, `fov_to_vector`, `quaternion_array`, `rotate_vectors`, `interpolate_quaternions` |
-| Load GENA Parquet | `load` | `load_gena`; types: `gena.frame.ParameterDataFrame`, `gena.frame.ParticleDataFrame` |
+| Load GENA Parquet | `load` | `load("gena", ...)`; types: `gena.frame.ParameterDataFrame`, `gena.frame.ParticleDataFrame` |
 | Interpolate PDF position or attitude | `gena.frame.ParameterDataFrame` | `pos_at`, `rot_at` |
 | Save Matplotlib figures consistently | `plots.vis` | `savefig` |
 | Build event masks | `gena.filter` | `check`, atomic rules, `soft_std`, `golden_std`, `diagnose`, `classify` |
@@ -107,14 +107,14 @@ Use `.agents/skills/gena/scripts/api_query.py` before relying on this static map
 | Construct interactive 3-D scenes | `plots.v3d` | `SceneContext`, `prepare_scene`, `make_scene`, `dumpGeo` |
 | Decode telemetry | `gena.raw.decode` | `decode` |
 | Convert data levels | `gena.raw.conversion` | `l0_2_l1`, `l1_2_l1a`, `l1a_2_l1b`, `l1_2_l2` |
-| Load THEMIS | `load` | `load_spedas("themis", ...)`, `load_pos("themis", ...)`; use `load_spedas("themis", ..., "esd", datatype="peif")` for ESA L2 3-D distributions |
+| Load THEMIS | `load` | `load("themis", ...)`, `load_pos("themis", ...)`; use `load("themis", ..., "esd", datatype="peif")` for ESA L2 3-D distributions |
 | Compose preloaded mission panels | `plots.advance` | `Panel`, `overview`, `env` |
 | Plot THEMIS | `plots.basic.themis` | `themis`, `spectrum`, `flux`, `get_ma_beta`, `velocity_parallel_perp` |
 | Classify regions and plasma-sheet flows | `libs.regions` | `classify_liuzzo`, `classify_kiehas`, `classify_runov`, `classify_plasma_sheet_flows`; optional column mappings accept other missions |
 | Plot classification strips | `plots.advance` | `plot_region_code` |
-| Load MMS | `load` | `load_spedas("mms", ...)` |
-| Load OMNI | `load` | `load_spedas("omni", ...)` |
-| Load geomagnetic indices | `load` / `load.api.indices` | `load_indices`, `read_indices`, `parse_indices`; field definitions in `INDICES_FIELDS` |
+| Load MMS | `load` | `load("mms", ...)` |
+| Load OMNI | `load` | `load("omni", ...)` |
+| Load geomagnetic indices | `load` / `load.api.indices` | `load("indices", ...)`, `read_indices`, `parse_indices`; field definitions in `INDICES_FIELDS` |
 | Combine solar-wind context | `load` | `load_sw` |
 | Sun/Moon/satellite ephemeris | `libs.ephemeris` | `sun`, `moon`, `satellites`, `update_satellite_orbits` (`satellites` returns GSE positions in `R_E`, rejects out-of-coverage requests by default, and accepts opt-in `update=True`) |
 | Plasma physics | `libs.plasma` | `alfven_velocity`, `beta`, `sigma_HH`, `f_maxwellian` |
@@ -145,10 +145,10 @@ paths = configure(file_base="/data/ENA")
 GENA supports daily discovery and direct files:
 
 ```python
-from load import load_gena
+from load import load
 
-l2 = load_gena(trange=["2025-03-12", "2025-03-13"], product="l2_a")
-one_file = load_gena(file="/data/20250312_l2_a.pqt")
+l2 = load("gena", trange=["2025-03-12", "2025-03-13"], product="l2_a")
+one_file = load("gena", file="/data/20250312_l2_a.pqt")
 ```
 
 Product suffixes are exact: `pdf`, `l1a_a/b`, `l1b_a/b`, `l2_a/b`, soft
@@ -158,21 +158,21 @@ Product suffixes are exact: `pdf`, `l1a_a/b`, `l1b_a/b`, `l2_a/b`, soft
 Mission loaders:
 
 ```python
-from load import load_spedas
-from load import load_indices
+from load import load
+from load import load
 
-esa = load_spedas("themis", trange, "esa", probe="b")  # strict local read by default
-esa_density = load_spedas("themis", trange, "esa", probe="b", variables=["peir_density"])
-downloaded_esa = load_spedas("themis", trange, "esa", probe="b", download=True)
-auto_esa = load_spedas("themis", trange, "esa", probe="b", download="local_first")
-esd = load_spedas("themis", trange, "esd", probe="b", datatype="peif", download=True)
-fpi = load_spedas("mms", trange, "fpi", probe=1)
-omni = load_spedas("omni", trange)  # BZ/BY GSM, speed, density, pressure
-offline_omni = load_spedas("omni", trange, download=False)
-auroral = load_indices(trange)  # one frame with ae, al, and au columns
-dst = load_indices(trange, "dst")
-context = load_indices(trange, ["dst", "sym_h", "kp", "ap_daily", "f107"], download="local_first")
-legacy_esa = load_spedas("themis", trange, "esa", probe="b", return_type="dict")
+esa = load("themis", trange, "esa", probe="b")  # strict local read by default
+esa_density = load("themis", trange, "esa", probe="b", variables=["peir_density"])
+downloaded_esa = load("themis", trange, "esa", probe="b", download=True)
+auto_esa = load("themis", trange, "esa", probe="b", download="local_first")
+esd = load("themis", trange, "esd", probe="b", datatype="peif", download=True)
+fpi = load("mms", trange, "fpi", probe=1)
+omni = load("omni", trange)  # BZ/BY GSM, speed, density, pressure
+offline_omni = load("omni", trange, download=False)
+auroral = load("indices", trange)  # one frame with ae, al, and au columns
+dst = load("indices", trange, "dst")
+context = load("indices", trange, ["dst", "sym_h", "kp", "ap_daily", "f107"], download="local_first")
+legacy_esa = load("themis", trange, "esa", probe="b", return_type="dict")
 figure, axis = esa.tplot("peir_avgtemp")
 ```
 
@@ -192,7 +192,7 @@ the L1 `state` product. `state` is the position/velocity source behind
 rather than `l2`; pass an explicit `level=` only for products that offer several.
 Pass `variables=[...]` to replace the relevant default list; probe prefixes are
 optional in these user-supplied names. Use the shared `variables=` argument for explicit field selection.
-THEMIS ESD is a separate L2-only ESA distribution product. Call `load_spedas("themis", ..., "esd", datatype="peif")` for full-mode ion distributions; it defaults to the CDF-native `valid`, `data_quality`, `bins`, `eff`, and `eflux` variables. ESD arrays retain their three-dimensional `(time, energy-channel, solid-angle-bin)` values in `TimeSeriesDataFrame` cells, while pySPEDAS channel axes `v1`/`v2` are preserved as `<variable>_v1`/`<variable>_v2` companion array columns. Pass `return_type="dict"` to retain the direct pySPEDAS-style `x`/`y`/`v1`/`v2` dictionaries.
+THEMIS ESD is a separate L2-only ESA distribution product. Call `load("themis", ..., "esd", datatype="peif")` for full-mode ion distributions; it defaults to the CDF-native `valid`, `data_quality`, `bins`, `eff`, and `eflux` variables. ESD arrays retain their three-dimensional `(time, energy-channel, solid-angle-bin)` values in `TimeSeriesDataFrame` cells, while pySPEDAS channel axes `v1`/`v2` are preserved as `<variable>_v1`/`<variable>_v2` companion array columns. Pass `return_type="dict"` to retain the direct pySPEDAS-style `x`/`y`/`v1`/`v2` dictionaries.
 MMS retains its standard FPI and HPCA moment defaults. OMNI defaults to
 `BZ_GSM`, `BY_GSM`, `flow_speed`, `proton_density`, and `Pressure`.
 For NASA SPDF OMNI downloads, a loopback system proxy is bypassed only for the
@@ -220,10 +220,10 @@ GENA ``flux_e`` and ``flux_t_e`` accept ``normalized=True, E_norm=(low, high)`` 
 
 ```python
 from gena import filter as gf
-from load import load_gena
+from load import load
 from gena.post import statistic as stat
 
-l2 = load_gena(trange=trange, product="l2_a")
+l2 = load("gena", trange=trange, product="l2_a")
 l2 = l2.select(gf.energy_eff(Emin=4, Emax=100))
 weights = build_event_weights(l2)
 centers, flux, error = stat.flux_e(l2, energy_bins, exposure=exposure_seconds, geometric_factor=geometric_factor, weights=weights)
@@ -310,6 +310,6 @@ TimeIndexedDataFrame owns UTC normalization, selection, interval splitting, plot
 
 ## Index source boundary
 
-`load/api/indices.py` owns Kyoto HAPI AE/Dst/SYM/ASY and GFZ Kp/ap/Ap/SN/F10.7 access, field definitions, cache and download policy, scalar decoding, and source metadata. `read_indices()` returns `(data, layouts)` and `parse_indices()` creates structured variables. `load/loaders/indices.py` owns one `load_indices()` pipeline; it does not contain per-product loading wrappers. Default products are AE/AL/AU; `prefix` specifies the cache root and `download=False` is strictly offline, `"local_first"` reuses cache and fetches missing months, and `"refresh"` replaces validated monthly JSON. Source times are retained: Kyoto Dst at HH:29:30, GFZ daily labels at midnight rather than an invented noon; ap and daily Ap retain index units of 2 nT. Single-product dictionary output remains a flat x/y record. The old dst2 alias and text-cache/save_folder interface are replaced by best-available dst and the shared prefix/download interface. See `load/api/indices.md` for products and examples.
+`load/api/indices.py` owns Kyoto HAPI AE/Dst/SYM/ASY and GFZ Kp/ap/Ap/SN/F10.7 access, field definitions, cache and download policy, scalar decoding, and source metadata. `read_indices()` returns `(data, layouts)` and `parse_indices()` creates structured variables. `load/loaders/indices.py` owns one `load("indices", )` pipeline; it does not contain per-product loading wrappers. Default products are AE/AL/AU; `prefix` specifies the cache root and `download=False` is strictly offline, `"local_first"` reuses cache and fetches missing months, and `"refresh"` replaces validated monthly JSON. Source times are retained: Kyoto Dst at HH:29:30, GFZ daily labels at midnight rather than an invented noon; ap and daily Ap retain index units of 2 nT. Single-product dictionary output remains a flat x/y record. The old dst2 alias and text-cache/save_folder interface are replaced by best-available dst and the shared prefix/download interface. See `load/api/indices.md` for products and examples.
 
 The current `load/load.py` facade imports the source loaders from `load/loaders` and read/parse APIs from `load/api`; it now also re-exports `assemble` through `load/__init__`. The position helpers behind `load_pos()` are private to the facade and accept a scalar or one-dimensional time sequence. The facade and package initializer no longer import or export the removed `esa_mode2_angles`, `themis_decompress`, or `read_themis_cdf` helpers.

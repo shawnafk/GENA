@@ -21,7 +21,7 @@ import pytest
 import load as load_pkg
 from common.config import resolve_paths
 from common.interp import f_interp_vars
-from load import load, load_pos, load_spedas, load_sw
+from load import load, load_pos, load_sw
 
 TRANGE = ["20251204", "20251205"]
 TRANGE_NEXT_DAY = ["20251204", "20251206"]
@@ -183,7 +183,7 @@ def test_load_sw_keeps_real_omni_values():
 def test_all_nan_sym_h_still_breaks_plain_interpolation():
     """Diagnostic: load_sw now isolates this failure per variable."""
     _require(SPEDAS_BASE / "omni_data/hro_1min/2025/omni_hro_1min_20251201_v01.cdf")
-    data = load_spedas(
+    data = load(
         "omni", ["2025-12-03T23:00:00", "2025-12-04T07:00:00"],
         product="hro", variables=["SYM_H", "Pressure"],
         return_type="dict", download=False,
