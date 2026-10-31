@@ -1,7 +1,7 @@
 """One index-loading pipeline; source access and field rules live in the API."""
 
 from load.api.indices import read_indices, parse_indices
-from load.api.assembly import assemble
+from load.api.variable import assemble
 from common.time import Time
 
 __all__ = ["load_indices"]

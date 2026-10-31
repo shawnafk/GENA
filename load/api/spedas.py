@@ -162,17 +162,12 @@ def _variable_layouts(data, *, vectors=(), energy=()):
     return layouts
 
 
-def _configured_spedas_dir(prefix):
-    if prefix is not None:
-        return str(Path(prefix).expanduser())
-    return get_configured_paths()["spedas_base"]
-
-
 def _read_themis(trange, *, product, variables, probe, level, prefix, download, **kwargs):
     from pyspedas.projects.themis.config import CONFIG
     from pyspedas.projects.themis.load import load as backend_load
 
-    CONFIG["local_data_dir"] = _configured_spedas_dir(prefix) + "/themis_data/"
+    base = Path(prefix or get_configured_paths()["spedas_base"]).expanduser()
+    CONFIG["local_data_dir"] = str(base / "themis_data")
     call_kwargs = dict(kwargs)
     call_kwargs.update(
         instrument=product,
@@ -221,7 +216,8 @@ def _fpi_datatypes(full_names):
 def _read_mms(trange, *, product, variables, probe, prefix, download, level="l2", **kwargs):
     from pyspedas.projects import mms as backend
 
-    directory = _configured_spedas_dir(prefix) + "/mms_data/"
+    base = Path(prefix or get_configured_paths()["spedas_base"]).expanduser()
+    directory = str(base / "mms_data")
     os.environ["MMS_DATA_DIR"] = directory
     from pyspedas.projects.mms.mms_config import CONFIG
 
@@ -267,12 +263,13 @@ def _read_mms(trange, *, product, variables, probe, prefix, download, level="l2"
 
 
 def _read_omni(trange, *, variables, prefix, download, **kwargs):
+    base = Path(prefix or get_configured_paths()["spedas_base"]).expanduser()
     if download in (False, "offline", "local"):
         from spacepy import pycdf
 
         dates = Time(trange).datetime
         start, end = dates[0], dates[1]
-        directory = Path(_configured_spedas_dir(prefix)) / "omni_data" / "hro_1min"
+        directory = base / "omni_data" / "hro_1min"
         parts = {name: [] for name in variables}
         for month in pd.period_range(start.to_period("M"), end.to_period("M"), freq="M"):
             date = month.start_time
@@ -302,7 +299,7 @@ def _read_omni(trange, *, variables, prefix, download, **kwargs):
         from pyspedas.projects.omni.config import CONFIG
         from pyspedas.projects.omni.load import load as backend_load
 
-        CONFIG["local_data_dir"] = _configured_spedas_dir(prefix) + "/omni_data/"
+        CONFIG["local_data_dir"] = str(base / "omni_data")
         kwargs.setdefault("varnames", list(variables or []))
         remote_url = CONFIG["remote_data_dir"]
         proxies = requests.utils.get_environ_proxies(remote_url)

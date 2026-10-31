@@ -62,7 +62,7 @@ The indices path follows the same layers as SPEDAS: `read_indices()` returns `(d
 ```python
 from load import load
 from load.api.indices import parse_indices, read_indices
-from load.api.assembly import assemble
+from load.api.variable import assemble
 
 trange = ["2025-01-01", "2025-01-02"]
 data, layouts = read_indices(trange, ["ae", "dst", "f107"])

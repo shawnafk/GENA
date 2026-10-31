@@ -3,8 +3,7 @@
 import logging
 
 from load.api.spedas import default_level, parse_spedas, read_spedas
-from load.api.assembly import assemble
-from load.api.variables import _clip_variable_dict
+from load.api.variable import _clip_variable_dict, assemble
 from common.time import Time
 
 logger = logging.getLogger(__name__)

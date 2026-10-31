@@ -30,7 +30,7 @@ compose preloaded products in `plots.advance` and study-specific analyses in ana
 
 The `load` package exports only `load`, `load_pos`, and `load_sw`; the facade lives in `load/load.py`, and mission readers plus `read_*`/`parse_*`/`assemble` are module-level internals. THEMIS, MMS, and OMNI share `load/loaders/spedas.py`, which owns clipping, assembly, and return-type handling; mission-specific loader wrappers have been removed. GENA and indices retain their own loader modules; the shared assembler currently lives in `load/loaders/gena.py`. `libs.regions` owns cross-mission classification; explicit column mappings allow non-THEMIS inputs. Only `load`, `load_pos`, and `load_sw` are re-exported from the package; removed scientific helpers are not re-exported. Loader return types, download policies, configuration and units are unchanged.
 
-Shared loader-only normalization helpers live privately in `load/api/variables.py`. In particular, `_clip_variable_dict()` trims backend `x`/`y` dictionaries before conversion and is not part of the `common` or `load` public API.
+Shared loader-only normalization helpers live privately in `load/api/variable.py`. In particular, `_clip_variable_dict()` trims backend `x`/`y` dictionaries before conversion and is not part of the `common` or `load` public API.
 
 Treat `deprecated/` and `gena/raw/filter_od.py` as historical unless the user
 explicitly requests legacy behavior. Prefer public functions without a leading
