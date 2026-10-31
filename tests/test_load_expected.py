@@ -77,7 +77,7 @@ def test_empty_mms_result_is_distinguishable():
 def test_mms_level_is_forwarded(monkeypatch):
     captured = {}
 
-    def fake_read_mms(trange, *, product, variables, probe, prefix, download, level="l2", **kwargs):
+    def fake_read_mms(trange, *, product, variables, probe, base, download, level="l2", **kwargs):
         captured["level"] = level
         return {}, {}
 

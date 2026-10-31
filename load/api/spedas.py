@@ -162,11 +162,10 @@ def _variable_layouts(data, *, vectors=(), energy=()):
     return layouts
 
 
-def _read_themis(trange, *, product, variables, probe, level, prefix, download, **kwargs):
+def _read_themis(trange, *, product, variables, probe, level, base, download, **kwargs):
     from pyspedas.projects.themis.config import CONFIG
     from pyspedas.projects.themis.load import load as backend_load
 
-    base = Path(prefix or get_configured_paths()["spedas_base"]).expanduser()
     CONFIG["local_data_dir"] = str(base / "themis_data")
     call_kwargs = dict(kwargs)
     call_kwargs.update(
@@ -213,10 +212,9 @@ def _fpi_datatypes(full_names):
     return groups or ["dis-moms"]
 
 
-def _read_mms(trange, *, product, variables, probe, prefix, download, level="l2", **kwargs):
+def _read_mms(trange, *, product, variables, probe, base, download, level="l2", **kwargs):
     from pyspedas.projects import mms as backend
 
-    base = Path(prefix or get_configured_paths()["spedas_base"]).expanduser()
     directory = str(base / "mms_data")
     os.environ["MMS_DATA_DIR"] = directory
     from pyspedas.projects.mms.mms_config import CONFIG
@@ -262,8 +260,7 @@ def _read_mms(trange, *, product, variables, probe, prefix, download, level="l2"
     return data, _variable_layouts(data, vectors=vectors, energy=energy)
 
 
-def _read_omni(trange, *, variables, prefix, download, **kwargs):
-    base = Path(prefix or get_configured_paths()["spedas_base"]).expanduser()
+def _read_omni(trange, *, variables, base, download, **kwargs):
     if download in (False, "offline", "local"):
         from spacepy import pycdf
 
@@ -364,19 +361,20 @@ def read_spedas(
         default_variables(key, product, probe) if variables is None else variables,
         probe,
     )
+    base = Path(prefix or get_configured_paths()["spedas_base"]).expanduser()
     if key == "themis":
         data, layouts = _read_themis(
             trange, product=product, variables=variables, probe=probe,
-            level=level, prefix=prefix, download=download, **kwargs,
+            level=level, base=base, download=download, **kwargs,
         )
     elif key == "mms":
         data, layouts = _read_mms(
             trange, product=product, variables=variables, probe=probe,
-            level=level, prefix=prefix, download=download, **kwargs,
+            level=level, base=base, download=download, **kwargs,
         )
     elif key == "omni":
         data, layouts = _read_omni(
-            trange, variables=variables, prefix=prefix, download=download, **kwargs,
+            trange, variables=variables, base=base, download=download, **kwargs,
         )
 
     layouts.update(variable_layouts or {})

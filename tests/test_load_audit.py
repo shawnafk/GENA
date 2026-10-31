@@ -67,7 +67,7 @@ def test_single_interval_index_dict_is_flat(monkeypatch):
 def test_read_spedas_forwards_mms_level(monkeypatch):
     captured = {}
 
-    def fake_read_mms(trange, *, product, variables, probe, prefix, download, level="l2", **kwargs):
+    def fake_read_mms(trange, *, product, variables, probe, base, download, level="l2", **kwargs):
         captured["level"] = level
         return {}, {}
 
