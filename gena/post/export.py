@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from common.config import resolve_output_path
+from common.frame import concat
 from common.time import Time
 from plots.vis import savefig
 from plots import ani as gena_ani
@@ -348,12 +349,11 @@ def observation_summary(
     prob = normalize_probe(prob)
     periods = normalize_report_times(time)
     output_dir = resolve_output_path(output_dir)
-    intervals = [list(period) for period in periods]
-    pdf = load_gena(trange=intervals, product="pdf")
-    ena = load_gena(
-        trange=intervals,
-        product=f"{ena_product}_{prob}",
-    )
+    pdf = concat([load_gena(trange=list(period), product="pdf") for period in periods])
+    ena = concat([
+        load_gena(trange=list(period), product=f"{ena_product}_{prob}")
+        for period in periods
+    ])
     summary = build_observation_summary(
         pdf,
         ena,
