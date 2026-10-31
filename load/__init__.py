@@ -1,10 +1,6 @@
 """Public source loaders, parsers, and time-series assembly."""
 
 from load.load import (
-    get_goes_loc,
-    get_mms_loc,
-    get_queqiao_loc,
-    get_themis_loc,
     load_gena,
     load_indices,
     load_spedas,
@@ -17,10 +13,6 @@ from load.api.public import assemble
 from load.api.spedas import parse_spedas, read_spedas
 
 __all__ = [
-    "get_themis_loc",
-    "get_mms_loc",
-    "get_goes_loc",
-    "get_queqiao_loc",
     "load",
     "load_pos",
     "load_sw",

@@ -50,7 +50,7 @@ THEMIS_FIELDS = {
         "modes": (), "vectors": (), "energy": (),
     },
     "esd": {"default": lambda p: ["valid", "data_quality", "bins", "eff", "eflux"], "modes": (), "vectors": (), "energy": ()},
-    # ``state`` supplies the position/velocity vectors used by get_themis_loc().
+    # ``state`` supplies the position/velocity vectors used by load_pos().
     # The shared "{root}{mode}_{field}" rule yields th<probe>_pos_gsm etc.
     "state": {
         "default": lambda p: [f"th{p}_pos_gsm", f"th{p}_vel_gsm"],

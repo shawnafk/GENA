@@ -80,7 +80,7 @@ from gena.frame import ParameterDataFrame, ParticleDataFrame
 from plots.basic import gena as gena_vis
 
 # THEMIS in-situ
-from load import get_themis_loc, load_spedas
+from load import load_spedas
 from plots.basic.themis import themis as plot_themis, flux
 from plots.basic.themis import get_ma_beta
 
@@ -339,3 +339,5 @@ sw = load_sw(t)                          # → {'Pressure', 'BY_GSM', 'BZ_GSM', 
 4. Use `common.config.resolve_paths()` for pure path parsing and `common.config.configure()` or `get_configured_paths()` when I/O paths must be validated.
 5. For coordinate transforms, import from `common.coord`.
 6. Put reusable cross-mission calculations in `libs/` and study-specific orchestration in analysis scripts.
+
+加载器负责解释来源文件，科学模块负责物理计算，绘图模块负责展示；它们通过这里明确的时间与数组格式交换数据。本手册按当前实现说明行为，特别区分“函数已经保证的事情”和“调用方需要保证的事情”。

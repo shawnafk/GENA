@@ -14,13 +14,11 @@ from common.time import Time
 
 
 def normalize_interval(trange):
-    """Normalize one inclusive interval to two ordered UTC timestamps."""
-    dates = Time(trange).datetime
-    if isinstance(dates, pd.Timestamp) or len(dates) != 2:
-        raise ValueError("trange must contain exactly two time values")
-    if dates[0] > dates[1]:
-        raise ValueError("trange start must not be later than end")
-    return dates
+    """Convert a two-element UTC interval without validating it.
+
+    Callers pass ``[start, end]``; length and ordering are their responsibility.
+    """
+    return Time(trange).datetime
 
 
 def _time_sample_cells(values):

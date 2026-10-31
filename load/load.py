@@ -163,10 +163,6 @@ def load(mission, trange, product=None, *, probe=None, key=None, **kwargs):
 
 
 __all__ = [
-    "get_goes_loc",
-    "get_mms_loc",
-    "get_queqiao_loc",
-    "get_themis_loc",
     "load",
     "load_sw",
     "load_pos",
@@ -215,7 +211,7 @@ def _backend_position(value, variable_name, reader):
     return result[0] if times.isscalar else result
 
 
-def get_themis_loc(t, probe="b", coord="gsm"):
+def _get_themis_loc(t, probe="b", coord="gsm"):
     """Interpolate a THEMIS probe position in the common ``(N, 3)`` layout.
 
     The source is the THEMIS state product. ``coord`` is the state-variable
@@ -236,7 +232,7 @@ def get_themis_loc(t, probe="b", coord="gsm"):
     return _backend_position(t, variable_name, reader)
 
 
-def get_mms_loc(t, probe="1", coord="gsm", *, download=None, **kwargs):
+def _get_mms_loc(t, probe="1", coord="gsm", *, download=None, **kwargs):
     """Interpolate an MMS MEC position at arbitrary UTC times.
 
     MMS MEC position variables are named ``mmsN_mec_r_COORD``. The returned
@@ -272,7 +268,7 @@ def get_mms_loc(t, probe="1", coord="gsm", *, download=None, **kwargs):
     return _backend_position(t, variable_name, reader)
 
 
-def get_goes_loc(t, satellite, coord="gsm", *, download=None, **kwargs):
+def _get_goes_loc(t, satellite, coord="gsm", *, download=None, **kwargs):
     """Interpolate a GOES orbit position at arbitrary UTC times.
 
     ``satellite`` is the GOES spacecraft number. Orbit vectors are loaded
@@ -307,7 +303,7 @@ def get_goes_loc(t, satellite, coord="gsm", *, download=None, **kwargs):
     return _backend_position(t, variable_name, reader)
 
 
-def get_queqiao_loc(t, satellite=None):
+def _get_queqiao_loc(t, satellite=None):
     """Interpolate the Queqiao position recorded in GENA PDF engineering data.
 
     The PDF position columns are Moon-relative MJ2000 coordinates in metres.
@@ -336,13 +332,13 @@ def load_pos(mission, trange, id=None, *, coord="gsm", **kwargs):
     """
     key = str(mission).strip().lower()
     if key == "themis":
-        return get_themis_loc(trange, probe="a" if id is None else id, coord=coord)
+        return _get_themis_loc(trange, probe="a" if id is None else id, coord=coord)
     if key == "mms":
-        return get_mms_loc(trange, probe="1" if id is None else id, coord=coord, **kwargs)
+        return _get_mms_loc(trange, probe="1" if id is None else id, coord=coord, **kwargs)
     if key in {"goes", "goes-r"}:
         if id is None:
             raise ValueError("id is required for GOES")
-        return get_goes_loc(trange, id, coord=coord, **kwargs)
+        return _get_goes_loc(trange, id, coord=coord, **kwargs)
     if key in {"queqiao", "qq", "gena"}:
-        return get_queqiao_loc(trange, id)
+        return _get_queqiao_loc(trange, id)
     raise ValueError("mission must be 'themis', 'mms', 'goes', or 'queqiao'")

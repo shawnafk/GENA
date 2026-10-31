@@ -92,7 +92,7 @@ from plots.basic import gena as gena_vis
 from gena.post import statistic as gena_stat
 
 # THEMIS 原位探测数据
-from load import get_themis_loc, load_spedas
+from load import load_spedas
 from plots.basic.themis import themis as plot_themis, flux, get_ma_beta
 
 # MMS 原位探测数据

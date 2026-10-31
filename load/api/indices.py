@@ -57,10 +57,6 @@ def _products(product):
 
 def _interval(trange):
     dates = Time(trange).datetime
-    if not isinstance(dates, pd.DatetimeIndex) or len(dates) != 2:
-        raise ValueError("trange must contain exactly two time values")
-    if dates.hasnans or dates[0] > dates[1]:
-        raise ValueError("trange must contain valid times in increasing order")
     return dates[0], dates[1]
 
 
