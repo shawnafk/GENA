@@ -117,8 +117,13 @@ def load_gena(*, file=None, trange=None, product=None, columns=None):
         if effective_product == "pdf":
             result = result.drop_duplicates(subset=["Timestamp"], keep="first")
         else:
-            event_columns = [name for name in result.columns if name != "UUID"]
-            result = result.drop_duplicates(subset=event_columns, keep="first")
+            # Event identity is (UUID, PID). PacketID/EventID are per-file
+            # provenance indexes and must not participate in global dedupe.
+            if {"UUID", "PID"}.issubset(result.columns):
+                result = result.drop_duplicates(subset=["UUID", "PID"], keep="first")
+            else:
+                event_columns = [name for name in result.columns if name != "UUID"]
+                result = result.drop_duplicates(subset=event_columns, keep="first")
         result = result.sort_values("Timestamp", kind="stable")
     if columns is not None:
         missing = [name for name in columns if name not in result.columns]

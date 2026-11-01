@@ -1,428 +1,345 @@
+"""Raw packet conversion orchestration.
+
+The implementation is intentionally kept in this module: framing and field
+decoding live in :mod:`gena.raw.packet`, level physics lives in
+:mod:`gena.raw.conversion`, and this module only coordinates passes, product
+selection and I/O.
+"""
+
+from __future__ import annotations
+
+import argparse
+from collections import Counter
+from dataclasses import dataclass
+import hashlib
+import logging
+from pathlib import Path
 import time
-import sys
-import traceback
+
 import numpy as np
-from collections import OrderedDict
+import pandas as pd
 from tqdm import tqdm
 
 from . import packet as pkt
 from . import conversion as conv
 from . import constants as const
-import gena.filter as flt
 from . import pqt_io
-import os
+import gena.filter as flt
 
 
-class _TqdmLogging(tqdm):
-    """tqdm subclass that mirrors progress bar output to a log file."""
+LOGGER = logging.getLogger(__name__)
 
-    def __init__(self, *args, log_file=None, **kwargs):
-        self._log_file = log_file
-        self._postfix_dict = {}
-        super().__init__(*args, **kwargs)
 
-    def set_postfix(self, ordered_dict=None, refresh=True, **kwargs):
-        """Override to stash the raw dict before tqdm stringifies it."""
-        pf = OrderedDict([] if ordered_dict is None else ordered_dict)
-        for key in sorted(kwargs.keys()):
-            pf[key] = kwargs[key]
-        self._postfix_dict = pf
-        super().set_postfix(ordered_dict=ordered_dict, refresh=refresh, **kwargs)
+def _normalize_probe(prob):
+    """Return lowercase probe identity; decode owns public probe validation."""
+    if not isinstance(prob, str) or prob.lower() not in ('a', 'b'):
+        raise ValueError("prob must be 'a' or 'b'")
+    return prob.lower()
 
-    def display(self, msg=None, pos=None):
-        super().display(msg=msg, pos=pos)
-        fd = self.format_dict
-        if not fd:
-            return
-        postfix = self._postfix_dict
-        step_parts = [f"{k}={v}" for k, v in postfix.items()]
-        step_str = f" | {' | '.join(step_parts)}" if step_parts else ""
-        elapsed = fd.get('elapsed', 0)
-        remaining = fd.get('remaining', 0)
-        eta_str = f"<{remaining:.0f}s" if remaining is not None and remaining >= 0 else ""
-        line = (
-            f"Chunk {fd.get('n', 0)}/{fd.get('total', 0)} "
-            f"[{elapsed:.0f}s{eta_str}]"
-            f"{step_str}\n"
+ENGINEERING_COLUMNS = [
+    'PacketID', 'Timestamp', 'HV_C', 'HV_G',
+    'MJ2000_q1', 'MJ2000_q2', 'MJ2000_q3',
+    'MJ2000_Star_X', 'MJ2000_Star_Y', 'MJ2000_Star_Z',
+    'PosePresent',
+]
+EVENT_PRODUCTS = frozenset({"l1", "l1a", "l2", "l2s", "l2g"})
+ALL_PRODUCTS = frozenset({"pdf"}) | EVENT_PRODUCTS
+
+# L2G selection: apply the physical 90 x 30 mm carbon/start aperture. The end
+# plane keeps the existing 150 x 60 mm engineering window.
+L2G_START_APERTURE_MM = (90, 30)
+L2G_END_WINDOW_MM = (150, 60)
+
+
+@dataclass(frozen=True)
+class RawConfig:
+    """Explicit configuration for one raw conversion."""
+
+    snid: int = 1
+    chunk_packets: int = 4096
+    by_day: bool = True
+    overwrite: bool = True
+    force: bool = False
+    products: frozenset[str] = frozenset({"pdf", "l1a", "l2", "l2s", "l2g"})
+    progress: bool = True
+
+    def validate(self):
+        if self.snid not in (1, 2):
+            raise ValueError("snid must be 1 (orbit) or 2 (ground)")
+        if not isinstance(self.chunk_packets, int) or self.chunk_packets < 1:
+            raise ValueError("chunk_packets must be a positive integer")
+        unknown = set(self.products) - ALL_PRODUCTS
+        if unknown:
+            raise ValueError(f"unknown products: {sorted(unknown)}")
+        if not self.products:
+            raise ValueError("at least one product must be requested")
+
+
+@dataclass
+class RunReport:
+    source: Path
+    source_bytes: int
+    source_sha256: str
+    snid: int
+    packet_count: int
+    duplicate_packets: int
+    truncated_bytes: int
+    product_rows: dict[str, int]
+    product_paths: dict[str, Path]
+    elapsed_seconds: float
+
+
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with Path(path).open('rb') as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _iter_unique_packets(raw_file, config, seen, progress=None, stats=None):
+    """Yield (packet array, PacketID array, duplicate count) in file order."""
+    next_id = 0
+    for packets in pkt.iter_packets(raw_file, config.chunk_packets, stats=stats):
+        for packet in packets:
+            uuids = pkt.packet_uuids(packet)
+            keep_list = []
+            for uuid_value in uuids:
+                accepted = uuid_value not in seen
+                keep_list.append(accepted)
+                if accepted:
+                    seen.add(uuid_value)
+            keep = np.asarray(keep_list, dtype=bool)
+            count = int(keep.sum())
+            if progress is not None:
+                progress.update(len(uuids))
+            if count == 0:
+                yield packet[keep], np.empty(0, dtype=np.uint32), len(uuids)
+                continue
+            ids = np.arange(next_id, next_id + count, dtype=np.uint32)
+            next_id += count
+            yield packet[keep], ids, len(uuids) - count
+
+
+def _engineering_frame(pdf):
+    columns = [name for name in ENGINEERING_COLUMNS if name in pdf.columns]
+    return pdf[columns].copy()
+
+
+def _scan_engineering(raw_file, config, writer, progress=None):
+    """First pass: validate/deduplicate packets, write PDF, collect index."""
+    seen = set()
+    parts = []
+    packet_count = 0
+    duplicate_packets = 0
+    stats = {}
+    for packet, ids, duplicates in _iter_unique_packets(raw_file, config, seen, progress, stats=stats):
+        packet_count += len(ids)
+        duplicate_packets += duplicates
+        if len(ids) == 0:
+            continue
+        pdf = pkt.packets_2_pdf(packet)
+        pdf['PacketID'] = ids
+        if 'pdf' in config.products:
+            writer.write(pdf, 'pdf')
+        parts.append(_engineering_frame(pdf))
+    engineering = (pd.concat(parts, ignore_index=True)
+                   if parts else pd.DataFrame(columns=ENGINEERING_COLUMNS))
+    return engineering, packet_count, duplicate_packets, int(stats.get('truncated_bytes', 0))
+
+
+def _quality_masks(l1a, l2, params, probe):
+    soft = np.asarray(flt.soft_std(dir='all', params=params, prob=probe)(l1a), dtype=bool)
+    gold = np.asarray(flt.golden_std(dir='all', params=params, prob=probe)(l1a), dtype=bool)
+    if len(l2):
+        # 90 x 30 mm is the physical start/carbon aperture; without it L2G
+        # would accept starts outside the documented detector area.
+        gold = gold & np.asarray(
+            flt.onboard_eff(
+                l2,
+                c_size=L2G_START_APERTURE_MM,
+                m_size=L2G_END_WINDOW_MM,
+            ),
+            dtype=bool,
         )
-        if self._log_file is not None:
-            self._log_file.write(line)
-            self._log_file.flush()
-        else:
-            # verbose mode: print to terminal
-            sys.__stdout__.write(line)
-            sys.__stdout__.flush()
-
-    def __del__(self, *args, **kwargs):
-        try:
-            super().__del__(*args, **kwargs)
-        except AttributeError:
-            pass
+    return soft, gold
 
 
-#from memory_profiler import profile
-#@profile
-#snid = 1: default is use orbit parameters
-def decode(raw_file,output_folder='./',by_day=True,snid=1,verbose=False):
-    params = const.init_param(snid)
-    start_time_tot = time.time()
-    directory = os.path.dirname(output_folder)
-    if not os.path.exists(directory):
-        os.makedirs(directory)
+def _convert_events(raw_file, config, engineering, writer, progress=None):
+    """Second pass: decode events and write L1/L1A/L2 products."""
+    params = const.init_param(config.snid)
+    seen = set()
+    counts = Counter()
+    packet_count = 0
+    duplicate_packets = 0
+    want_l1 = 'l1' in config.products
+    want_l1a = 'l1a' in config.products or bool(config.products & {'l2', 'l2s', 'l2g'})
+    want_l2 = bool(config.products & {'l2', 'l2s', 'l2g'})
 
-    # Redirect stdout/stderr to log files so they don't interrupt tqdm bar.
-    # The progress bar itself writes to the real stderr (terminal).
-    if not verbose:
-        raw_basename = os.path.basename(raw_file)
-        std_log = open(os.path.join(output_folder, f'{raw_basename}.stdout.log'), 'a')
-        err_log = open(os.path.join(output_folder, f'{raw_basename}.stderr.log'), 'a')
-        _orig_stdout = sys.stdout
-        _orig_stderr = sys.stderr
-        sys.stdout = std_log
-        sys.stderr = err_log
-    else:
-        std_log = None
-        err_log = None
-        _orig_stdout = sys.stdout
-        _orig_stderr = sys.stderr
+    for packet, ids, duplicates in _iter_unique_packets(raw_file, config, seen, progress):
+        packet_count += len(ids)
+        duplicate_packets += duplicates
+        if len(ids) == 0:
+            continue
+        df0 = pkt.packets_2_df0(packet)
+        repeated = np.repeat(ids, 62)
+        pid = np.tile(np.arange(1, 63, dtype=np.uint64), len(ids))
+        df0['PacketID'] = repeated
+        df0['EventID'] = (repeated.astype(np.uint64) << 6) | (pid - 1)
+        df0 = df0.loc[~df0['is_empty_slot']].reset_index(drop=True)
+        if df0.empty:
+            continue
+        for probe in ('a', 'b'):
+            probe = _normalize_probe(probe)
+            l1 = conv.l0_2_l1(df0, probe, config.snid).reset_index(drop=True)
+            if want_l1:
+                writer.write(l1, f'l1_{probe}')
+                counts[f'l1_{probe}'] += len(l1)
+            if not want_l1a:
+                continue
+            l1a = conv.l1_2_l1a(l1, engineering)
+            if len(l1a) == 0:
+                continue
+            if 'l1a' in config.products:
+                writer.write(l1a, f'l1a_{probe}')
+                counts[f'l1a_{probe}'] += len(l1a)
+            if not want_l2:
+                continue
+            l2 = conv.l1a_2_l2(l1a, params=params, prob=probe)
+            if 'l2' in config.products:
+                writer.write(l2, f'l2_{probe}')
+                counts[f'l2_{probe}'] += len(l2)
+            soft, gold = _quality_masks(l1a, l2, params, probe)
+            if 'l2s' in config.products:
+                writer.write(l2.loc[soft], f'l2s_{probe}')
+                counts[f'l2s_{probe}'] += int(np.count_nonzero(soft))
+            if 'l2g' in config.products:
+                writer.write(l2.loc[gold], f'l2g_{probe}')
+                counts[f'l2g_{probe}'] += int(np.count_nonzero(gold))
+    return packet_count, duplicate_packets, counts
 
-    #if not use a single file instead of sorting by day
-    #need to init all pqt files at first
-    if not by_day:
-        pqt_io.init_pqt(output_folder)
 
-    #io_flag  = os.environ.get('GENA_IO_FLAG')
-    #if io_flag == None:
-    #     gio.gena_h5_init(output_folder)
-    # if io_flag == 'pqt':
-    #     #its a prefix _{pdf,l1a,l1b,l2a,l2b}.{pqt}
-    #     directory = os.path.dirname(output_folder)
-    #     if not os.path.exists(directory):
-    #         os.makedirs(directory)
-    #     gio.init_pqt(output_folder)
-    #     #gio.init_pqt2(output_folder)
-    # if io_flag == 'hdf':
-    #     gio.init_hdf(output_folder)
+def convert_raw(raw_file, output_folder, config=None, progress=None):
+    """Convert one raw file into the configured product set.
 
-    f = open(raw_file,'rb')
-    fsize = f.seek(0,2)
-    f.seek(0,0)
-    cbytes = 2064*const.chunk_size
-
-    chunk_size = np.min([cbytes,fsize])
-
-    if np.mod(fsize,2064) == 0:
-        print(f'file may contain {fsize/2064} packets')
-    else:
-        print(f'file may contain {fsize/2064} packets, but not aligned')
-    if fsize < cbytes:
-        print(f'Decode all packets in one chunk')
-    else:
-        print(f'Decode {const.chunk_size} packets in one chunk')
-
-    total_chunks = int(np.ceil(fsize / chunk_size))
-
-    read_raw_time = 0
-    find_head_time = 0
-    parse_pdf_time = 0
-    parse_df0_time = 0
-    save_pdf_time = 0
-    save_l1_time = 0
-    save_l1a_time = 0
-    save_l1b_time = 0
-    save_l2_time = 0
-
-    chunk_start = 0
-    total_packets = 0
-    written_id = 0
-    chunk_num = 0
-
-    if not verbose:
-        pbar = _TqdmLogging(total=total_chunks, desc="Decoding", unit="chunk",
-                            file=sys.__stderr__, log_file=std_log)
-    else:
-        pbar = _TqdmLogging(total=total_chunks, desc="Decoding", unit="chunk",
-                            file=open(os.devnull, 'w'), log_file=None)
+    The function runs a packet-level engineering pass, builds a global
+    :class:`conversion.EngineeringIndex`, then runs the event pass. Existing
+    products are replaced atomically; no append or partial Parquet file is
+    published.
+    """
+    config = config or RawConfig()
+    config.validate()
+    source = Path(raw_file).expanduser().resolve()
+    target = Path(output_folder).expanduser().resolve()
+    if not source.is_file():
+        raise FileNotFoundError(source)
+    target.mkdir(parents=True, exist_ok=True)
+    LOGGER.info('converting %s -> %s (snid=%d, products=%s)',
+                source, target, config.snid, ','.join(sorted(config.products)))
+    before = source.stat()
+    source_sha256 = _sha256_file(source)
+    start = time.perf_counter()
+    writer = pqt_io.ProductWriter(
+        target,
+        by_day=config.by_day,
+        overwrite=config.overwrite,
+        force=config.force,
+        metadata={
+            'gena_source_sha256': source_sha256,
+            'gena_snid': config.snid,
+            'gena_schema_version': pqt_io.SCHEMA_VERSION,
+        },
+    )
     try:
-        try:
-            while(True):
-                chunk_num += 1
-
-                # Read chunk
-                start_time = time.time()
-                chunk_size = np.min((chunk_size,fsize-chunk_start))
-                read_buffer = np.memmap(raw_file, offset = chunk_start, shape=(chunk_size), mode='r')
-                end_time = time.time()
-
-                read_raw_time += end_time - start_time
-                pbar.set_postfix(step="Read", step_t=f"{end_time - start_time:.2f}s")
-
-                # Find frame headers
-                start_time = time.time()
-                frame_index = pkt.find_frame_header_re(read_buffer)
-                end_time = time.time()
-                find_head_time += end_time - start_time
-
-                pbar.set_postfix(step="FindHeaders", step_t=f"{end_time - start_time:.2f}s")
-
-                # Read packets
-                start_time = time.time()
-                packets,last,residual = pkt.read_packet_opt(read_buffer,frame_index)
-                # [MOD] validate packets: filter out structurally invalid ones (false headers with correct 2064 spacing but wrong structure)
-                #valid_packets = []
-                #for p in packets:
-                #    mask = pkt.validate_packets(p)
-                #    removed = len(p) - np.sum(mask)
-                #    if removed > 0:
-                #        pbar.write(f"  Removed {removed}/{len(p)} structurally invalid packets")
-                #    if np.any(mask):
-                #        valid_packets.append(p[mask])
-                #packets = valid_packets
-
-                #print("next start at:", last)
-                len_packets  = np.sum([len(p) for p in packets])
-                total_packets = total_packets + len_packets
-
-                end_time = time.time()
-
-                read_raw_time += end_time - start_time
-                pbar.set_postfix(step="ReadPackets", step_t=f"{end_time - start_time:.2f}s")
-
-                for p in packets:
-
-                    # Parse PDF
-                    start_time = time.time()
-                    pdf = pkt.packets_2_pdf(p).drop_duplicates(subset=['Timestamp']).reset_index(drop=True)
-                    #pdf = pkt.packets_2_pdf(p)
-                    end_time = time.time()
-                    parse_pdf_time += end_time - start_time
-                    pbar.set_postfix(step="Parse PDF", step_t=f"{end_time - start_time:.2f}s")
-
-                    # PDF data is always parsed because downstream event products
-                    # need its attitude and engineering parameters.  This flag
-                    # controls only whether the PDF product is written to disk.
-                    if const.save_pdf == 1:
-                        start_time = time.time()
-                        if not by_day:
-                            pqt_io.save_pqt(pdf,output_folder,'pdf')
-                        else:
-                            pqt_io.save_pqt_daily(pdf,output_folder,'pdf')
-                        end_time = time.time()
-                        save_pdf_time += end_time - start_time
-                        pbar.set_postfix(step="Save PDF", step_t=f"{end_time - start_time:.2f}s")
-
-                    if const.pdf_only == 0:
-                        # Parse DF0
-                        start_time = time.time()
-                        df0 = pkt.packets_2_df0(p)
-                        del p
-
-                        end_time = time.time()
-                        pbar.set_postfix(step="DF0", step_t=f"{end_time - start_time:.2f}s")
-
-                        # L0 → L1
-                        start_time = time.time()
-
-                        # L0 → L1: Convert raw TDC to nanoseconds
-                        df1_a = conv.l0_2_l1(df0,'a',snid).drop_duplicates().reset_index(drop=True)
-                        df1_b = conv.l0_2_l1(df0,'b',snid).drop_duplicates().reset_index(drop=True)
-
-                        end_time = time.time()
-                        pbar.set_postfix(step="L0→L1", step_t=f"{end_time - start_time:.2f}s")
-
-                        # Save L1 data
-                        if (const.save_l1 == 1):
-                            start_time = time.time()
-                            if not by_day:
-                                pqt_io.save_pqt(df1_a, output_folder, 'l1_a')
-                                pqt_io.save_pqt(df1_b, output_folder, 'l1_b')
-                            else:
-                                pqt_io.save_pqt_daily(df1_a, output_folder, 'l1_a')
-                                pqt_io.save_pqt_daily(df1_b, output_folder, 'l1_b')
-                            end_time = time.time()
-                            save_l1_time += end_time - start_time
-                            pbar.set_postfix(step="Save L1", step_t=f"{end_time - start_time:.2f}s")
-                        del df0
-
-                        # L1 → L1A
-                        start_time = time.time()
-                        # L1 → L1A: Select 8-channel events and interpolate PDF parameters
-                        df1a_a = conv.l1_2_l1a(df1_a, pdf).drop_duplicates().reset_index(drop=True)
-                        df1a_b = conv.l1_2_l1a(df1_b, pdf).drop_duplicates().reset_index(drop=True)
-                        end_time = time.time()
-                        pbar.set_postfix(step="L1→L1A", step_t=f"{end_time - start_time:.2f}s")
-
-                        # Save L1A data
-                        if (const.save_l1a == 1):
-                            start_time = time.time()
-                            if not by_day:
-                                pqt_io.save_pqt(df1a_a, output_folder, 'l1a_a')
-                                pqt_io.save_pqt(df1a_b, output_folder, 'l1a_b')
-                            else:
-                                pqt_io.save_pqt_daily(df1a_a, output_folder, 'l1a_a')
-                                pqt_io.save_pqt_daily(df1a_b, output_folder, 'l1a_b')
-                            end_time = time.time()
-                            save_l1a_time += end_time - start_time
-                            pbar.set_postfix(step="Save L1A", step_t=f"{end_time - start_time:.2f}s")
+        engineering, packet_count, duplicates, truncated_bytes = _scan_engineering(
+            source, config, writer, progress)
+        LOGGER.info('engineering pass: %d unique packets, %d duplicate packets, %d truncated bytes',
+                    packet_count, duplicates, truncated_bytes)
+        if duplicates:
+            LOGGER.warning('%d duplicate packet(s) skipped', duplicates)
+        if truncated_bytes:
+            LOGGER.warning('%d truncated byte(s) at end of source', truncated_bytes)
+        if config.products & EVENT_PRODUCTS:
+            event_engineering = conv.EngineeringIndex(engineering)
+            event_packets, event_duplicates, _ = _convert_events(
+                source, config, event_engineering, writer, progress)
+            if event_packets != packet_count or event_duplicates != duplicates:
+                raise RuntimeError(
+                    'source changed between engineering and event passes')
+        after = source.stat()
+        if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+            raise RuntimeError('source changed during conversion')
+        rows, paths = writer.finish()
+        LOGGER.info('wrote %d product file(s), %d total rows',
+                    len(rows), sum(rows.values()))
+    except BaseException:
+        writer.abort()
+        raise
+    elapsed = time.perf_counter() - start
+    return RunReport(
+        source=source,
+        source_bytes=before.st_size,
+        source_sha256=source_sha256,
+        snid=config.snid,
+        packet_count=packet_count,
+        duplicate_packets=duplicates,
+        truncated_bytes=truncated_bytes,
+        product_rows=rows,
+        product_paths=paths,
+        elapsed_seconds=elapsed,
+    )
 
 
-                
-                        if (const.repair == 1):
-                            # L1A → L1B
-                            start_time = time.time()
-                            # L1A → L1B: Calculate TOF, Energy, positions
-                            df1b_a = conv.l1a_2_l1b(df1a_a, params,prob='a',method=const.method).drop_duplicates().reset_index(drop=True)
-                            df1b_b = conv.l1a_2_l1b(df1a_b, params,prob='b',method=const.method).drop_duplicates().reset_index(drop=True)
-                            end_time = time.time()
-                            pbar.set_postfix(step="L1A→L1B", step_t=f"{end_time - start_time:.2f}s")
+def _parse_products(value):
+    if not value:
+        return RawConfig().products
+    return frozenset(item.strip() for item in value.split(',') if item.strip())
 
 
-                            # Save L1B data
-                            if (const.save_l1b == 1):
-                                start_time = time.time()
-                                if not by_day:
-                                    pqt_io.save_pqt(df1b_a, output_folder, 'l1b_a')
-                                    pqt_io.save_pqt(df1b_b, output_folder, 'l1b_b')
-                                else:
-                                    pqt_io.save_pqt_daily(df1b_a, output_folder, 'l1b_a')
-                                    pqt_io.save_pqt_daily(df1b_b, output_folder, 'l1b_b')
-                                end_time = time.time()
-                                save_l1b_time += end_time - start_time
-                                pbar.set_postfix(step="Save L1B", step_t=f"{end_time - start_time:.2f}s")
-
-                            # L1B → L2
-                            start_time = time.time()
-                            df2b_a = conv.l1_2_l2(df1b_a, prob='a').drop_duplicates().reset_index(drop=True)
-                            df2b_b = conv.l1_2_l2(df1b_b, prob='b').drop_duplicates().reset_index(drop=True)
-                            end_time = time.time()
-                            pbar.set_postfix(step="L1B→L2", step_t=f"{end_time - start_time:.2f}s")
-                
-                            # Save L2 data
-                            if (const.save_l2 == 1):
-                                start_time = time.time()
-                                if not by_day:
-                                    pqt_io.save_pqt(df2b_a, output_folder, 'l2b_a')
-                                    pqt_io.save_pqt(df2b_b, output_folder, 'l2b_b')
-                                else:
-                                    pqt_io.save_pqt_daily(df2b_a, output_folder, 'l2b_a')
-                                    pqt_io.save_pqt_daily(df2b_b, output_folder, 'l2b_b')
-                                end_time = time.time()
-                                save_l2_time += end_time - start_time
-                                pbar.set_postfix(step="Save L2", step_t=f"{end_time - start_time:.2f}s")
-
-                            del  df1b_a, df1b_b, pdf, df2b_a, df2b_b
-                        else:
-                            #generate pure 1a l2 and soft l2 and strict l2
-                
-                            start_time = time.time()
-                            df2_a = conv.l1_2_l2(df1a_a, params = params, prob='a').drop_duplicates().reset_index(drop=True)
-                            df2_b = conv.l1_2_l2(df1a_b, params = params, prob='b').drop_duplicates().reset_index(drop=True)
-                            end_time = time.time()
-                            pbar.set_postfix(step="L1A -> L2", step_t=f"{end_time - start_time:.2f}s")
-                
-                            # L1A → L2S (soft quality selection)
-                            start_time = time.time()
-                            func_soft_l1_a = flt.soft_std(dir='all',params=params, prob='a')
-                            func_soft_l1_b = flt.soft_std(dir='all',params=params, prob='b')
-                            #need improve style
-                            df2s_a = conv.l1_2_l2(df1a_a.loc[func_soft_l1_a(df1a_a)], params=params, prob='a').drop_duplicates().reset_index(drop=True)
-                            df2s_b = conv.l1_2_l2(df1a_b.loc[func_soft_l1_b(df1a_b)], params=params, prob='b').drop_duplicates().reset_index(drop=True)
-                
-                            end_time = time.time()
-                            pbar.set_postfix(step="L1A → L1S->L2S", step_t=f"{end_time - start_time:.2f}s")
- 
-
-                            # L1A → L2G (strict + spatial quality selection)
-                            start_time = time.time()
-                            func_gold_l1_a = flt.golden_std(dir='all',params=params, prob='a')
-                            func_gold_l1_b = flt.golden_std(dir='all',params=params, prob='b')
-                            #need improve style
-                            df2g_a = conv.l1_2_l2(df1a_a.loc[func_gold_l1_a(df1a_a)], params=params, prob='a').drop_duplicates().reset_index(drop=True)
-                            df2g_b = conv.l1_2_l2(df1a_b.loc[func_gold_l1_b(df1a_b)], params=params, prob='b').drop_duplicates().reset_index(drop=True)
-                            # Golden products are the strict-filter result plus
-                            # the spatial detector-window check.  Do not replace
-                            # them with the softer L2S products here.
-                            df2g_a = df2g_a.loc[flt.onboard_eff(df2g_a,c_size=[150,60])].reset_index(drop=True)
-                            df2g_b = df2g_b.loc[flt.onboard_eff(df2g_b,c_size=[150,60])].reset_index(drop=True)
-                
-                            end_time = time.time()
-                            pbar.set_postfix(step="L1A → L1G->L2G", step_t=f"{end_time - start_time:.2f}s")
- 
-                            # Save L2 data
-                            if (const.save_l2 == 1):
-                                start_time = time.time()
-                                if not by_day:
-                                    pqt_io.save_pqt(df2_a, output_folder, 'l2_a')
-                                    pqt_io.save_pqt(df2_b, output_folder, 'l2_b')
-                                    pqt_io.save_pqt(df2s_a, output_folder, 'l2s_a')
-                                    pqt_io.save_pqt(df2s_b, output_folder, 'l2s_b')
-                                    pqt_io.save_pqt(df2g_a, output_folder, 'l2g_a')
-                                    pqt_io.save_pqt(df2g_b, output_folder, 'l2g_b')
-                                else:
-                                    pqt_io.save_pqt_daily(df2_a, output_folder, 'l2_a')
-                                    pqt_io.save_pqt_daily(df2_b, output_folder, 'l2_b')
-                                    pqt_io.save_pqt_daily(df2s_a, output_folder, 'l2s_a')
-                                    pqt_io.save_pqt_daily(df2s_b, output_folder, 'l2s_b')
-                                    pqt_io.save_pqt_daily(df2g_a, output_folder, 'l2g_a')
-                                    pqt_io.save_pqt_daily(df2g_b, output_folder, 'l2g_b')
-                                end_time = time.time()
-                                save_l2_time += end_time - start_time
-                                pbar.set_postfix(step="Save L2", step_t=f"{end_time - start_time:.2f}s")
-
-                            del  df2_a, df2_b, df2s_a, df2s_b, df2g_a, df2g_b
-                        del df1_a, df1_b, df1a_a, df1a_b, pdf
-                        parse_df0_time += end_time - start_time
-
-                        written_id +=1
-                del packets
-                pbar.set_postfix(step=f"Packets:{len_packets}")
-
-                chunk_start = chunk_start + last
-                pbar.update(1)
-
-                if(chunk_start == fsize or chunk_start + residual == fsize):
-                    break
-        except:
-            traceback.print_exc()
-            if not verbose:
-                traceback.print_exc(file=std_log)
-                std_log.flush()
-            sys.stderr.flush()
-            raise
+def main(argv=None):
+    parser = argparse.ArgumentParser(description='Convert GENA raw telemetry to Parquet.')
+    parser.add_argument('raw_file')
+    parser.add_argument('output_folder')
+    parser.add_argument('--snid', type=int, choices=(1, 2), default=1)
+    parser.add_argument('--chunk-packets', type=int, default=4096)
+    parser.add_argument('--products', default=','.join(sorted(RawConfig().products)),
+                        help='comma-separated: pdf,l1,l1a,l2,l2s,l2g')
+    parser.add_argument('--no-day-split', action='store_true')
+    parser.add_argument('--no-overwrite', action='store_true')
+    parser.add_argument('--force', action='store_true')
+    parser.add_argument('--quiet', action='store_true')
+    args = parser.parse_args(argv)
+    logging.basicConfig(
+        level=logging.ERROR if args.quiet else logging.INFO,
+        format='%(levelname)s %(name)s: %(message)s')
+    config = RawConfig(
+        snid=args.snid,
+        chunk_packets=args.chunk_packets,
+        by_day=not args.no_day_split,
+        overwrite=not args.no_overwrite,
+        force=args.force,
+        products=_parse_products(args.products),
+        progress=not args.quiet,
+    )
+    progress = None
+    if config.progress:
+        progress = tqdm(total=None, unit='packet', desc='raw', leave=False)
+    try:
+        report = convert_raw(args.raw_file, args.output_folder, config=config,
+                             progress=progress)
+    except Exception:
+        LOGGER.exception('conversion failed: %s', args.raw_file)
+        return 1
     finally:
-        summary_parts = [
-            '=='*10 + 'SUMMARY' + '=='*10,
-            f'Num packets processed {total_packets}',
-            f"Load RAW to memory costs: {read_raw_time:.2f} s",
-            f"Searching frame index costs: {find_head_time:.2f} s",
-            f"Parse and dump parameters costs: {parse_pdf_time:.2f} s",
-            f"Parse and dump df0 costs: {parse_df0_time:.2f} s",
-            f"Save PDF costs: {save_pdf_time:.2f} s",
-            f"Save L1 costs: {save_l1_time:.2f} s",
-            f"Save L1A costs: {save_l1a_time:.2f} s",
-            f"Save L1B costs: {save_l1b_time:.2f} s",
-            f"Save L2 costs: {save_l2_time:.2f} s",
-        ]
-        total_save = save_pdf_time + save_l1_time + save_l1a_time + save_l1b_time + save_l2_time
-        summary_parts.append(f"Total save time: {total_save:.2f} s")
-        end_time_tot = time.time()
-        summary_parts.append(f"Total time costs: {end_time_tot - start_time_tot:.2f} s")
+        if progress is not None:
+            progress.close()
+    print(f'source: {report.source}')
+    print(f'packets: {report.packet_count} (duplicates {report.duplicate_packets})')
+    for name in sorted(report.product_rows):
+        print(f'{name}: {report.product_rows[name]}')
+    print(f'elapsed: {report.elapsed_seconds:.2f} s')
+    return 0
 
-        for line in summary_parts:
-            if not verbose:
-                std_log.write(line + '\n')
-            print(line, file=_orig_stdout)
-        if not verbose:
-            std_log.flush()
 
-        pbar.close()
-        if not verbose:
-            sys.stdout = _orig_stdout
-            sys.stderr = _orig_stderr
-            std_log.close()
-            err_log.close()
-
-if __name__ == "__main__":
-    rawfile = sys.argv[1]
-    outfolder = sys.argv[2]
-    decode(rawfile, outfolder)
+if __name__ == '__main__':
+    raise SystemExit(main())

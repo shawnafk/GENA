@@ -9,7 +9,8 @@ ep1_struct = np.dtype([
     ('HV_G', np.dtype('>i2')),
     ('HV_A', np.dtype('>i2')),
     ('HV_B', np.dtype('>i2')),
-    ('monitors', (np.int8, 8)),
+    # Monitor ADC bytes are unsigned; int8 turns codes >127 into negative values.
+    ('monitors', (np.uint8, 8)),
     ('temps', (np.uint8, 3)),
     ('stat', np.uint8),  
     ('Evt_Num_Tot', np.dtype('>u2')),
@@ -54,6 +55,7 @@ packet_struct = np.dtype([
 
 
 pdf_type = {
+        'PacketID': np.uint32,
         'BM': np.uint8,
         'BX': np.uint16,
         'Timestamp': np.float64,
@@ -78,9 +80,9 @@ pdf_type = {
         'Temp_B': np.float32,
         'Temp_PCB': np.float32,
 
-        'Evt_Num_Tot': np.uint32,
-        'Evt_Num_Eff': np.uint32,
-        'Evt_Num_Aux': np.uint32,
+        'Evt_Num_Tot': np.uint16,
+        'Evt_Num_Eff': np.uint16,
+        'Evt_Num_Aux': np.uint16,
     
         'MJ2000_q1': np.float32,
         'MJ2000_q2': np.float32,
@@ -93,7 +95,11 @@ pdf_type = {
         'Ant_Azi': np.float32,
         'Star_L' : np.float32,
         'Star_NZ': np.float32,
-        'Shadow' : np.float32,
+        'Shadow' : np.uint8,
+        'PlatformGroup': np.uint8,
+        'PosePresent': np.bool_,
+        'ArgsAddress': np.uint8,
+        'ArgsValue': np.uint32,
         
         
                 
@@ -114,7 +120,8 @@ df0_type ={
         'BM':            np.uint8,
         'BX':            np.uint16,
         'Timestamp':     np.float64,
-        'TimeInternal':  np.float32,
+        # Internal seconds counter can reach ~1e4 s; float32 loses the 20 us tick.
+        'TimeInternal':  np.float64,
         'EvtLevel':      np.uint8,
         'EP':            np.uint16,
         'prob_flag':     np.uint8,
@@ -130,16 +137,22 @@ df0_type ={
         'ch_5e':         np.uint16,
         'ch_7s':         np.uint16,
         'ch_7e':         np.uint16,
+        'is_empty_slot': np.bool_,
+        'PacketID':      np.uint32,
+        'EventID':       np.uint64,
 }
 
 
 df1_type ={
         'UUID':          np.dtype('S36'),
+        'PacketID':      np.uint32,
+        'EventID':       np.uint64,
         'PID':           np.uint8,
         'BM':            np.uint8,
         'BX':            np.uint16,
         'Timestamp':     np.float64,
-        'TimeInternal':  np.float32,
+        # Keep the same precision as L0; float32 discards 20 us ticks at large values.
+        'TimeInternal':  np.float64,
         'EvtLevel':      np.uint8,
         'EP':            np.float32,
         'Tof_0':         np.float32,
@@ -183,6 +196,8 @@ df1_type ={
 
 df1a_type ={
         'UUID':          np.dtype('S36'),
+        'PacketID':      np.uint32,
+        'EventID':       np.uint64,
         'PID':           np.uint8,
         'BM':            np.uint8,
         'BX':            np.uint16,
@@ -192,12 +207,13 @@ df1a_type ={
         'MJ2000_q1': np.float32,
         'MJ2000_q2': np.float32,
         'MJ2000_q3': np.float32,
-        'MJ2000_Star_X': np.int32,
-        'MJ2000_Star_Y': np.int32,
-        'MJ2000_Star_Z': np.int32,
+        'MJ2000_Star_X': np.float32,
+        'MJ2000_Star_Y': np.float32,
+        'MJ2000_Star_Z': np.float32,
         
         'Timestamp':     np.float64,
-        'TimeInternal':  np.float32,
+        # L1A inherits the L0/L1 internal-time precision.
+        'TimeInternal':  np.float64,
         'EvtLevel':      np.uint8,
         'EP':            np.float32,
         'Tof_0':         np.float32,
@@ -239,94 +255,28 @@ Type (数据诊断与修复等级) 定义：
 [零置信度：彻底报废]
 255: Trash (纯噪声或严重污染，无法修复，直接丢弃)
 '''
-#after repair and drop those can not be repaired, or still bad after repair.
-df1b_type ={
-        'UUID':          np.dtype('S36'),
-        'PID':           np.uint8,
-        'BM':            np.uint8,
-        'BX':            np.uint16,
-        
-        'HV_C': np.float32,
-        'HV_G': np.float32,
-        'MJ2000_q1': np.float32,
-        'MJ2000_q2': np.float32,
-        'MJ2000_q3': np.float32,
-        'MJ2000_Star_X': np.int32,
-        'MJ2000_Star_Y': np.int32,
-        'MJ2000_Star_Z': np.int32,
-
-       
-        'Timestamp':     np.float64,
-        'TimeInternal':  np.float32,
-        'EvtLevel':      np.uint8,
-        'EP':            np.float32,
-        'Tof_0':         np.float32,
-        'Tof_1':         np.float32,
-        'TX_1s':         np.float32,
-        'TX_1e':         np.float32,
-        'TX_2s':         np.float32,
-        'TX_2e':         np.float32,
-        'TY_1s':         np.float32,
-        'TY_1e':         np.float32,
-        'TY_2s':         np.float32,
-        'TY_2e':         np.float32,
-        
-        
-        
-        #mid result for repair
-        'Tofs': np.float32,
-        'Tofe': np.float32,
-        'Tofx0': np.float32,
-        'Tofy0': np.float32,
-        'Tofx1': np.float32,
-        'Tofy1': np.float32,
-        'tmpX1': np.float32,
-        'tmpX2': np.float32,
-        'tmpY1': np.float32,
-        'tmpY2': np.float32,
-        'pop_TX_1e':      np.float32,
-        'pop_TX_2e':      np.float32,
-        'pop_TY_1e':      np.float32,
-        'pop_TY_2e':      np.float32,
-        'Type': np.uint8,
-        'Process_Mask': np.uint32,
-
-        #quality flags for repair
-        'Xs_valid': np.uint8,
-        'Ys_valid': np.uint8,
-        'Xe_valid': np.uint8,
-        'Ye_valid': np.uint8,
-        'start_valid': np.uint8,
-        'end_valid': np.uint8,
-}
-
-#to level 2, we add GRP var, since from level 1 to level 2/
-#we have select strictly 0
-#tdc randomly trigger
-#fix algorithm see fix.md
-#fix channel x 1
-#fix channel y 2
-#fix channel xy 3
+# Level 2 derived event products. GRP was never populated and has been removed.
 
 df2_type ={
         'UUID':          np.dtype('S36'),
+        'PacketID':      np.uint32,
+        'EventID':       np.uint64,
         'PID':           np.uint8,
         'BM':        np.uint8,
         'BX':        np.uint16,
-
-        'GRP': np.uint8,
         'HV_C': np.float32,
         'HV_G': np.float32,
         'MJ2000_q1': np.float32,
         'MJ2000_q2': np.float32,
         'MJ2000_q3': np.float32,
 
-        'MJ2000_Star_X': np.int32,
-        'MJ2000_Star_Y': np.int32,
-        'MJ2000_Star_Z': np.int32,
+        'MJ2000_Star_X': np.float32,
+        'MJ2000_Star_Y': np.float32,
+        'MJ2000_Star_Z': np.float32,
 
         'Timestamp': np.float64,
-        'TimeInternal':  np.float32,
+        # L2 inherits the L1A internal-time precision.
+        'TimeInternal':  np.float64,
         'EvtLevel':  np.uint8,
         'EP':        np.float32,
         'X1':        np.float32,

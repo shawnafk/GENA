@@ -1,6 +1,14 @@
 import numpy as np
 import pandas as pd
+import hashlib
+import os
+import uuid
 from . import structure as st
+
+PACKET_MAGIC = b'\xe2\x25\x0c\x4e'
+PACKET_SIZE = st.packet_struct.itemsize
+PACKET_DATA_LENGTH = PACKET_SIZE - 8 - 1
+_PACKET_NAMESPACE = uuid.UUID('86a273e7-38c1-5e37-8c40-f16d1e3f2f3a')
 #bug!!!
 '''
 STEP 1: find header 0x(E2 25 0C 4E), decimal(226 37 12 28) position to locate each frame
@@ -99,8 +107,9 @@ def find_frame_header_seq(buffer):
 
 #use regular expression to find header; fastest
 import re
-def find_frame_header_re(buffer, target_pattern = b'\xe2%\x0cN'):
-    matches = [m.start() for m in re.finditer(target_pattern, buffer)]
+def find_frame_header_re(buffer, target_pattern=PACKET_MAGIC):
+    """Return literal synchronization offsets followed by a buffer-end sentinel."""
+    matches = [m.start() for m in re.finditer(re.escape(target_pattern), buffer)]
     #add buffer end position to matches
     matches.append(len(buffer))
     return np.array(matches)
@@ -158,91 +167,98 @@ def read_packet(buffer,idx):
 #buffer is numpy memmap file of the raw data; in chunk load mode, it is partial file (check cut file process, make sure use some redundency to avoid missing content)
 
 #heads_idx are index of the b'\xe2%\x0cN' head, obtained from regex finding function;
-def read_packet_opt(buffer,heads_idx):
-    #!missing the last packet length, which should be buffer length - mathch[-1]
-    #assuming there are N heads; len(heads_idx) = N;
-    length = heads_idx[1:] - heads_idx[:-1]
-    #for packet 1 to N - 1; get the indices of those length not equal to 2064
-    bad_idx =  heads_idx[:-1][length != 2064]
-    #for packet 1 to N - 1; get the actual length of those not equal to 2064 
-    bad_len = length[length != 2064]
-    
-    # * if no bad packets, just load all data from buffer, start from the first heads and load N-1 packets
-    if len(bad_idx) == 0:
-        #total num readed is len match -1
-        packets = [ 
-            np.frombuffer(buffer, dtype=st.packet_struct, offset=heads_idx[0], count=len(heads_idx)-1)
-        ]
-        #? what are there two variables for, last and residual
-        #*keep last header position
-        last = heads_idx[-1]
-        #*bytes not readed, for all good group, residual is 0
-        residual = 0
-    else:
-    # *  if bad packets exits; exclude those bad and assemble those consecutively effive packet into eff_s, new len
-    # * use np.frombuffer in group;
-        eff_start = []
-        eff_len = []
-        #* make sure the first is included
-        #! treat f as separated file; idx must start from 0, 
-        #?so variable "last"  is meanningless?
-        if bad_idx[0] != 0:
-            #fixed by gemini and glm 5.1
-            #eff_start.append(0)
-            #eff_len.append(bad_idx[0])
-            eff_start.append(heads_idx[0])
-            eff_len.append(bad_idx[0] - heads_idx[0])
-        for n in range(len(bad_idx)-1):
-            #* look up to the next good start; if the first bad is not zero is not bad,
-            #* if consecutive bad, will return a eff_len = 0
-            eff_start.append(bad_idx[n] + bad_len[n])
-            eff_len.append(bad_idx[n+1] - bad_idx[n] - bad_len[n]) 
-        nonzero_idx = np.array(eff_len) != 0
-        eff_start = np.array(eff_start)[nonzero_idx]
-        eff_len = np.array(eff_len)[nonzero_idx]
-        #if len(bad_idx == 1):
-        #    #if only one found, can not be our bad, since we chose integer multiple of 2064
-        #
-        #    last = bad_idx[0] + bad_len[0]
-        #else: 
-        #    #last bad may due to out cut, so keep those bad
-        #    last = bad_idx[-1] 
-        #! heads_idx[-1] is the idx of the EOF
-        #* if last bad start + bad length equal to the length of this file fragment; then the bad may be caused by cutting file, return last as next start point to read. 
-        if bad_idx[-1] + bad_len[-1] == heads_idx[-1]:
-            last = bad_idx[-1]
-            residual = bad_len[-1] 
-        else:
-            last = bad_idx[-1] + bad_len[-1]
-            residual = 0 
-        #all >0
-        #print(eff_len)
-        #for first, if first frame is not bad, then start from 0
-        #print('eff_len',eff_len)
-        #for the last, if last frame start + len not equal EOF, then end with the last frame
-        #print("last good is ",bad_idx[-1] + bad_len[-1])
-        #print('wrong end',heads_idx[-1] + 2064)
-        #if bad_idx[-1] + bad_len[-1] != heads_idx[-1] + 2064:
-        #if bad_idx[-1] + bad_len[-1] != heads_idx[-1]:
-        #    eff_start.append(bad_idx[-1] + bad_len[-1])
-        #    eff_len.append(idx[-1] + 2064 - (bad_idx[-1] + bad_len[-1]))
-        #last read from buffer
-        #packets = np.concatenate(
-        packets = [
-                np.frombuffer(buffer,dtype=st.packet_struct,offset=eff_s, count=eff_l) 
-                for eff_s, eff_l in 
-                zip(
-                    np.array(eff_start),
-                    #how many packets in one group
-                    (np.array(eff_len)/2064).astype(int)
-                    )
-            ]
-    
-    #flattened_packets = [item for sublist in packets for item in sublist]
-    #return np.array(flattened_packets,dtype=st.packet_struct)
-    #check packets idx
-    return packets, last, residual 
+def read_packet_opt(buffer, heads_idx, *, validate=True):
+    """Read complete fixed-size packets and retain a possible split packet tail.
+
+    A payload may contain the synchronization word, so the distance to the next
+    match does not define packet length. Each candidate occupies exactly 2064
+    bytes and, by default, must pass structural and checksum validation. Runs
+    are checked in vectorized batches. ``validate=False`` exposes complete
+    candidates for an external quality audit; it must not be used to declare
+    their contents valid.
+
+    Return ``(packet_arrays, consumed_bytes, residual_bytes)``. The residual is
+    an incomplete candidate or a 1--3 byte synchronization prefix and must be
+    prepended to the next read. At EOF callers should record that residual as
+    truncated input. No complete valid packet is lost merely because junk
+    follows it. Sequence gaps and counter wrap do not reject packets.
+    """
+    size = len(buffer)
+    heads = np.asarray(heads_idx, dtype=np.int64)
+    if heads.ndim != 1 or np.any(heads < 0) or np.any(heads > size):
+        raise ValueError('header offsets must be a one-dimensional buffer index list')
+    heads = np.unique(heads[heads < size])  # Remove the end sentinel.
+    complete = heads[heads + PACKET_SIZE <= size]
+    accepted = []
+    if len(complete):
+        runs = np.split(complete, np.flatnonzero(np.diff(complete) != PACKET_SIZE) + 1)
+        for run in runs:
+            candidates = np.frombuffer(buffer, dtype=st.packet_struct,
+                                       offset=int(run[0]), count=len(run))
+            mask = validate_packets(candidates) if validate else np.ones(len(run), dtype=bool)
+            accepted.extend(run[mask].tolist())
+
+    # Prefer the first valid enclosing packet over a synchronization word in
+    # its payload. This also prevents duplicate or overlapping event rows.
+    selected = []
+    end = 0
+    for offset in accepted:
+        if offset >= end:
+            selected.append(offset)
+            end = offset + PACKET_SIZE
+
+    arrays = []
+    if selected:
+        offsets = np.asarray(selected, dtype=np.int64)
+        for run in np.split(offsets, np.flatnonzero(np.diff(offsets) != PACKET_SIZE) + 1):
+            arrays.append(np.frombuffer(buffer, dtype=st.packet_struct,
+                                        offset=int(run[0]), count=len(run)))
+
+    pending = heads[(heads >= end) & (heads + PACKET_SIZE > size)]
+    consumed = int(pending[0]) if len(pending) else size
+    # A synchronization word can itself straddle a chunk boundary.
+    for length in range(1, len(PACKET_MAGIC)):
+        start = size - length
+        if start >= end and bytes(buffer[start:size]) == PACKET_MAGIC[:length]:
+            consumed = min(consumed, start)
+    return arrays, consumed, size - consumed
     #return last, residual 
+
+
+def iter_packets(raw_file, chunk_packets=4096, stats=None):
+    """Yield lists of validated packets from a raw file, chunk by chunk.
+
+    This is the shared framing loop for conversion passes. Each yielded list
+    contains one or more ``packet_struct`` arrays; arrays are views into a
+    temporary memory map and must be consumed before the generator advances.
+    ``stats`` may be a mutable mapping; ``truncated_bytes`` is updated with the
+    residual bytes left after the final chunk.
+    """
+    if not isinstance(chunk_packets, int) or chunk_packets < 1:
+        raise ValueError('chunk_packets must be a positive integer')
+    file_size = os.path.getsize(raw_file)
+    if file_size == 0:
+        return
+    chunk_bytes = PACKET_SIZE * chunk_packets
+    chunk_start = 0
+    residual = 0
+    while chunk_start < file_size:
+        size = int(min(chunk_bytes, file_size - chunk_start))
+        if size <= 0:
+            break
+        buffer = np.memmap(raw_file, offset=chunk_start, shape=(size,), mode='r')
+        heads = find_frame_header_re(buffer)
+        packets, consumed, residual = read_packet_opt(buffer, heads)
+        if packets:
+            yield packets
+        consumed = int(consumed)
+        if consumed <= 0:
+            break
+        chunk_start += consumed
+        if chunk_start == file_size or chunk_start + residual == file_size:
+            break
+    if stats is not None:
+        stats['truncated_bytes'] = int(residual)
 
 def eff_grp2(heads_idx):
     #!missing the last packet length, which should be buffer length - mathch[-1]
@@ -353,9 +369,9 @@ def packets_2_pdf(p):
 
     #first_2bits
     #loc no need use start and end explicitly
-    pdf['BM'] = (p[:]['seq1'] & 0b11).astype(np.uint8)
+    pdf['BM'] = (p[:]['seq2'] >> 14).astype(np.uint8)
     # last_14bits 
-    pdf['BX'] = (p[:]['seq1'] & 0b11111111111111).astype(np.uint16)
+    pdf['BX'] = (p[:]['seq2'] & 0x3fff).astype(np.uint16)
     #packet time
     #time_s is the seconds to 2021-01-01 00:00:00 BJT
     #2021-01-01 00:00:00 BJT is 2020-12-31 16:00:00 UTC
@@ -408,23 +424,27 @@ def packets_2_pdf(p):
     pdf['Evt_Num_Eff'] = evt_num_eff.view(evt_num_eff.dtype.newbyteorder())
     pdf['Evt_Num_Aux'] = evt_num_aux.view(evt_num_aux.dtype.newbyteorder())
     
-    #engineering parameter 2: attitude and position, reused frame
-    #0: paras 1, q4, coords
-    #1: paras 2, pointing 
-    reuse_mask =  p[:]['ep2']['stat']
+    # Platform group is the complete byte (protocol tables 4-3 and 4-4):
+    # 0 = clock/antenna; 1 = quaternion vector and Moon-relative position.
+    # Preserve presence explicitly: a numerical zero is a valid component.
+    group = p['ep2']['stat']
+    pose_present = group == 1
+    pointing_present = group == 0
+    pdf['PlatformGroup'] = group.astype(np.uint8)
+    pdf['PosePresent'] = pose_present
     
     # 复用帧第一组参数
     
     #q1, q2, q3, unit: q_dl = 2**-30
     q_dl = 2**-30
-    pdf['MJ2000_q1'] = (view_as(p[:]['ep2']['flex'][:,0:4][:,::-1], np.int32) * q_dl  * (reuse_mask)).astype(np.float32)
-    pdf['MJ2000_q2'] = (view_as(p[:]['ep2']['flex'][:,4:8][:,::-1], np.int32) * q_dl  * (reuse_mask)).astype(np.float32)
-    pdf['MJ2000_q3'] = (view_as(p[:]['ep2']['flex'][:,8:12][:,::-1], np.int32) * q_dl  * (reuse_mask)).astype(np.float32)
+    pdf['MJ2000_q1'] = np.where(pose_present, view_as(p['ep2']['flex'][:, 0:4], '>i4') * q_dl, 0).astype(np.float32)
+    pdf['MJ2000_q2'] = np.where(pose_present, view_as(p['ep2']['flex'][:, 4:8], '>i4') * q_dl, 0).astype(np.float32)
+    pdf['MJ2000_q3'] = np.where(pose_present, view_as(p['ep2']['flex'][:, 8:12], '>i4') * q_dl, 0).astype(np.float32)
 
     # 月心J2000惯性系卫星X\Y\Z方向位置: 补码，定点数，当量1m
-    pdf['MJ2000_Star_X'] = view_as(p[:]['ep2']['flex'][:,12:16][:,::-1], np.int32) * (reuse_mask) 
-    pdf['MJ2000_Star_Y'] = view_as(p[:]['ep2']['flex'][:,16:20][:,::-1], np.int32) * (reuse_mask)  
-    pdf['MJ2000_Star_Z'] = view_as(p[:]['ep2']['flex'][:,20:24][:,::-1], np.int32) * (reuse_mask)   
+    pdf['MJ2000_Star_X'] = np.where(pose_present, view_as(p['ep2']['flex'][:, 12:16], '>i4'), 0).astype(np.int32)
+    pdf['MJ2000_Star_Y'] = np.where(pose_present, view_as(p['ep2']['flex'][:, 16:20], '>i4'), 0).astype(np.int32)
+    pdf['MJ2000_Star_Z'] = np.where(pose_present, view_as(p['ep2']['flex'][:, 20:24], '>i4'), 0).astype(np.int32)
 
 
     # 复用帧第二组参数
@@ -442,18 +462,20 @@ def packets_2_pdf(p):
 
     # 天线指向中心角:补码，定点数，当量0.00001度，范围0~+360度
     a_dl = 0.00001
-    pdf['Ant_Ang'] = view_as(p[:]['ep2']['flex'][:,6:10][:,::-1], np.int32) * a_dl  *(1- reuse_mask)
-    pdf['Ant_Azi'] = view_as(p[:]['ep2']['flex'][:,10:14][:,::-1], np.int32) * a_dl *(1- reuse_mask)
+    pdf['Ant_Ang'] = np.where(pointing_present, view_as(p['ep2']['flex'][:, 6:10], '>i4') * a_dl, 0)
+    pdf['Ant_Azi'] = np.where(pointing_present, view_as(p['ep2']['flex'][:, 10:14], '>i4') * a_dl, 0)
                     
     m_dl = 0.00001
-    pdf['Star_L'] = view_as(p[:]['ep2']['flex'][:,14:18][:,::-1], np.int32) * m_dl  *(1- reuse_mask)
-    pdf['Star_NZ'] = view_as(p[:]['ep2']['flex'][:,18:22][:,::-1], np.int32) * a_dl *(1- reuse_mask)
-    pdf['Shadow'] = p[:]['ep2']['flex'][:,22] * (1-reuse_mask)
+    pdf['Star_L'] = np.where(pointing_present, view_as(p['ep2']['flex'][:, 14:18], '>i4') * m_dl, 0)
+    pdf['Star_NZ'] = np.where(pointing_present, view_as(p['ep2']['flex'][:, 18:22], '>i4') * a_dl, 0)
+    pdf['Shadow'] = np.where(pointing_present, p['ep2']['flex'][:, 22], 0)
     
     #read first, then lookup table, avoid checking
     para_addr = p[:]['ep2']['args_addr']
     #four bytes
     paras = p[:]['ep2']['args_value']
+    pdf['ArgsAddress'] = para_addr.astype(np.uint8)
+    pdf['ArgsValue'] = view_as(paras, '>u4').astype(np.uint32)
 
     #select concerned parameters
     # [MOD] use st.pdf_type[name] instead of hardcoded np.uint16; uint16 causes FutureWarning when assigning int16 values from signed_7bits
@@ -476,70 +498,78 @@ def packets_2_pdf(p):
 
 # [MOD] validate_packets: detect structurally invalid packets that passed the 2064-byte spacing check
 # but have wrong internal structure (e.g. false header from magic bytes appearing in event data)
-def validate_packets(p, max_bx_jump=100):
+def _wire_packets(p):
+    """Restore the wire byte order after NumPy concatenation or field copies."""
+    p = np.asarray(p)
+    if p.ndim != 1 or p.dtype.newbyteorder('=') != st.packet_struct.newbyteorder('='):
+        raise ValueError('packets must be a one-dimensional packet_struct array')
+    return np.ascontiguousarray(p, dtype=st.packet_struct)
+
+
+def packet_validation_flags(p):
+    """Return independent per-packet structural and checksum pass flags.
+
+    Protocol table 4-1 defines a byte sum over offsets [8, 2062), modulo
+    65536, stored as a big-endian unsigned word at offset 2062. It is not a
+    word sum or CRC. Packet-order discontinuities are diagnostics, not proof
+    of corruption: valid data can be repeated, out of order, or cross a
+    14-bit sequence-counter wrap.
     """
-    Validate parsed packets and return boolean mask of good packets.
+    p = _wire_packets(p)
+    raw = p.view(np.uint8).reshape(len(p), PACKET_SIZE)
+    checksum = raw[:, 8:-2].sum(axis=1, dtype=np.uint64) & 0xffff
+    return {
+        'sync': (p['header'] == [0xe2, 0x25]).all(axis=1),
+        'apid': p['seq1'] == 0x0c4e,
+        'length': p['dataLen'] == PACKET_DATA_LENGTH,
+        'time_ms': p['time_ms'] < 1000,
+        'checksum': checksum == p['verification_sum'],
+    }
 
-    Checks:
-    1. Header bytes must match magic pattern (catches misalignment)
-    2. BX sequence should be roughly monotonic (catches false headers)
-    3. Timestamps should not decrease (catches garbage data)
 
-    Args:
-        p: numpy structured array of packets (from read_packet_opt)
-        max_bx_jump: maximum allowed BX jump between consecutive packets
-                     (default 100, for normal operation BX increments by 1)
-    Returns:
-        good_mask: boolean array, True for valid packets
+def validate_packets(p, max_bx_jump=None):
+    """Return the AND of structural/checksum flags, independent of row order.
+
+    ``max_bx_jump`` is accepted for source compatibility but has no effect.
+    Use :func:`packet_validation_flags` to retain individual failure reasons.
     """
-    n = len(p)
-    if n == 0:
-        return np.array([], dtype=bool)
+    return np.logical_and.reduce(list(packet_validation_flags(p).values()))
 
-    good = np.ones(n, dtype=bool)
 
-    # Check 1: header bytes must be \xe2\x25\x0c\x4e
-    header_valid = np.all(p[:]['header'] == [0xE2, 0x25, 0x0C, 0x4E], axis=1)
-    good &= header_valid
+def packet_uuids(p):
+    """Stable packet UUIDs from every raw packet byte, independent of chunking.
 
-    # Check 2: BX (14-bit counter) should be roughly monotonic
-    bx = (p[:]['seq1'] & 0x3FFF).astype(np.int32)
-    if n > 1:
-        diff = np.diff(bx)
-        # Allow wrap: if diff < -8000, it's likely a 14-bit wrap (16384)
-        # Any other negative diff, or a huge positive jump, indicates a bad packet
-        bad_jump = (diff < -100) | (diff > max_bx_jump)
-        # Mark both neighbors of a bad jump as suspicious
-        bad_seq = np.zeros(n, dtype=bool)
-        bad_seq[:-1] |= bad_jump
-        bad_seq[1:] |= bad_jump
-        good &= ~bad_seq
+    The UUID5 name is the full SHA-256 packet digest. Repeated telemetry has
+    the same identity even if it is received in another file; event identity
+    is the pair (UUID, PID). Source file and byte-offset provenance should be
+    retained separately by the caller.
+    """
+    return [str(uuid.uuid5(_PACKET_NAMESPACE, hashlib.sha256(row.tobytes()).hexdigest()))
+            for row in _wire_packets(p)]
 
-    # Check 3: timestamp should not decrease
-    if n > 1:
-        time_diff = np.diff(p[:]['time_s'].astype(np.int64))
-        bad_time = np.zeros(n, dtype=bool)
-        bad_time[1:] |= (time_diff < 0)
-        good &= ~bad_time
-
-    return good
-
-import uuid
 #c++ parse packets cost: 4.09255 s
 def packets_2_df0(p):
+    """Decode all 62 event slots, preserving explicit zero-fill status.
+
+    ``is_empty_slot`` is true only for an entirely zero 32-byte slot. The row
+    remains available for byte accounting; science consumers can explicitly
+    exclude it without confusing padding with a measured probe-A event.
+    """
     df0 = pd.DataFrame({col: pd.Series(dtype=dtype) for col, dtype in st.df0_type.items()})
     num_packets = len(p)
     total_rows = num_packets * 62
-    uuids = [str(uuid.uuid4()) for _ in range(num_packets)]
+    uuids = packet_uuids(p)
     df0['UUID'] = np.repeat(uuids, 62)
     
     df0['PID'] = np.tile(np.arange(1, 63, dtype=np.uint8), num_packets)
 
-    df0['BM'] = np.repeat(p[:]['seq1'] & 0b11, 62)
-    df0['BX'] = np.repeat(p[:]['seq1'] & 0b11111111111111, 62)
+    df0['BM'] = np.repeat(p['seq2'] >> 14, 62).astype(np.uint8)
+    df0['BX'] = np.repeat(p['seq2'] & 0x3fff, 62).astype(np.uint16)
     df0['Timestamp'] = (np.repeat(1609430400 + p[:]['time_s'] + p[:]['time_ms']*0.001, 62)).astype(np.float64)
     
     p_dict_list = p[:]['events'][:] 
+    event_bytes = np.ascontiguousarray(p_dict_list).view(np.uint8).reshape(num_packets, 62, st.event_struct.itemsize)
+    df0['is_empty_slot'] = (event_bytes == 0).all(axis=2).ravel()
     # 1、探测器标志，取标志位，高位第1位
     df0['prob_flag'] = (p_dict_list['flag'] >> 7).flatten()
     # 1、事件有效性，取标志位，高位第2位
@@ -553,7 +583,8 @@ def packets_2_df0(p):
     event_Times = p_dict_list['time_s']
     # 2、微秒计数时间码，取时间码后2字节？
     event_Timeus = p_dict_list['time_us']
-    df0['TimeInternal'] = (event_Times + event_Timeus*0.00002).flatten().astype(np.float32)
+    # float64: TimeInternal is an absolute internal counter; float32 loses the 20 us tick.
+    df0['TimeInternal'] = (event_Times + event_Timeus*0.00002).flatten().astype(np.float64)
     
     # 3、电子幅度，取低12位; similar to UTC which is 6 bytes
     df0['EP'] = ( ( (p_dict_list['se_amp'][..., 1].astype(np.uint16) << 8 ) | (p_dict_list['se_amp'][..., 2].astype(np.uint16) ) ) & 0b111111111111).flatten()

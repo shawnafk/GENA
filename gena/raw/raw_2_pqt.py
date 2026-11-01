@@ -1,57 +1,80 @@
-from common.config import get_configured_paths
+#!/usr/bin/env python3
+"""Simple sequential CLI for GENA raw -> Parquet conversion."""
+
+from __future__ import annotations
+
 import argparse
-from multiprocessing import Pool, cpu_count
-from functools import partial
+import logging
+import sys
+from pathlib import Path
 
-def process_single_file(task, verbose=False):
-    from gena.raw import decode
+if __package__ in (None, ""):
+    # Allow direct execution as ./raw_2_pqt.py from gena/raw: make the repository
+    # root importable before importing the package.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from common.config import get_configured_paths
+    from gena.raw.decode import RawConfig, convert_raw
+else:
+    from common.config import get_configured_paths
+    from .decode import RawConfig, convert_raw
 
-    raw_file, output_dir = task
-    try:
-        if not verbose:
-            print(f"Processing: {raw_file}")
-        decode.decode(raw_file, output_dir, verbose=verbose)
-    except Exception as e:
-        print(f"ERROR processing {raw_file}: {str(e)}")
 
-def main():
+def _products(value):
+    return frozenset(item.strip() for item in value.split(',') if item.strip())
+
+
+def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Convert raw files to parquet (parallel processing)",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Environment variables (set before starting Python; 0 disables and 1 enables a flag):
-  GENA_CHUNK_SIZE      Packets decoded per chunk. Default: 100000.
-  GENA_PDF_ONLY       Skip event conversion after parsing the PDF data. Default: 0.
-  GENA_SAVE_PDF       Write the PDF product. Default: 1.
-  GENA_SAVE_L1        Write L1 products. Default: 0.
-  GENA_SAVE_L1A       Write L1A products. Default: 1.
-  GENA_USE_REPAIR     Run L1A-to-L1B event repair. Default: 0.
-  GENA_REPAIR_METHOD  Repair algorithm used when GENA_USE_REPAIR=1: 1 or 2. Default: 2.
-  GENA_SAVE_L1B       Write repaired L1B products when repair is enabled. Default: 1.
-  GENA_SAVE_L2        Write L2/L2S/L2G products. Default: 1.
-
-Example:
-  GENA_CHUNK_SIZE=200000 GENA_SAVE_L1=1 python gena/raw/raw_2_pqt.py -o OUTPUT RAW_FILE
-""",
+        description='Convert GENA raw files to Parquet (sequential, overwrite-based)')
+    parser.add_argument('-o', '--outdir', type=str,
+                        help='output directory; defaults to configured pqt_base')
+    parser.add_argument('files', nargs='+', help='raw input files')
+    parser.add_argument('--snid', type=int, choices=(1, 2), default=1)
+    parser.add_argument('--chunk-packets', type=int, default=RawConfig.chunk_packets)
+    parser.add_argument('--products', default=','.join(sorted(RawConfig().products)),
+                        help='comma-separated: pdf,l1,l1a,l2,l2s,l2g')
+    parser.add_argument('--no-day-split', action='store_true')
+    parser.add_argument('--no-overwrite', action='store_true')
+    parser.add_argument('--force', action='store_true')
+    parser.add_argument('-v', '--verbose', action='store_true')
+    parser.add_argument('-q', '--quiet', action='store_true',
+                        help='disable the progress bar and per-file start message')
+    args = parser.parse_args(argv)
+    logging.basicConfig(
+        level=logging.INFO if args.verbose else logging.WARNING,
+        format='%(levelname)s %(name)s: %(message)s')
+    output_dir = Path(args.outdir) if args.outdir else Path(get_configured_paths()['pqt_base'])
+    config = RawConfig(
+        snid=args.snid,
+        chunk_packets=args.chunk_packets,
+        by_day=not args.no_day_split,
+        overwrite=not args.no_overwrite,
+        force=args.force,
+        products=_products(args.products),
+        progress=not args.quiet,
     )
-    parser.add_argument("-o", "--outdir", type=str, help="Specify output directory")
-    parser.add_argument("files", nargs="+", help="Raw input files")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Verbose mode: no pbar, all output to terminal")
-    args = parser.parse_args()
+    from tqdm import tqdm
+    failed = 0
+    for raw_file in args.files:
+        progress = None
+        if not args.quiet:
+            print(f'Processing {raw_file} ...', flush=True)
+            progress = tqdm(total=None, unit='packet', desc=Path(raw_file).name,
+                            leave=False)
+        try:
+            report = convert_raw(raw_file, output_dir, config=config,
+                                 progress=progress)
+            print(f'{raw_file}: {report.packet_count} packets, '
+                  f'{sum(report.product_rows.values())} rows, '
+                  f'{report.elapsed_seconds:.2f}s', flush=True)
+        except Exception as exc:
+            failed += 1
+            print(f'ERROR {raw_file}: {exc}', flush=True)
+        finally:
+            if progress is not None:
+                progress.close()
+    return 1 if failed else 0
 
-    output_dir = args.outdir if args.outdir is not None else get_configured_paths()['pqt_base']
 
-    # Prepare tasks
-    tasks = [(f, output_dir) for f in args.files]
-    
-    # ✅ KEY FIX: auto use min(CPU cores, file count)
-    num_workers = min(cpu_count(), len(tasks))
-    print(f"Starting with {num_workers} workers...")
-
-    with Pool(num_workers) as pool:
-        pool.map(partial(process_single_file, verbose=args.verbose), tasks)
-
-    print("\nAll files processed.")
-
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    raise SystemExit(main())
