@@ -186,6 +186,10 @@ def _convert_events(raw_file, config, engineering, writer, progress=None):
         pid = np.tile(np.arange(1, 63, dtype=np.uint64), len(ids))
         df0['PacketID'] = repeated
         df0['EventID'] = (repeated.astype(np.uint64) << 6) | (pid - 1)
+        # L0 expands all 62 fixed slots. ``is_empty_slot`` is true only when
+        # the whole 32-byte event slot is zero; such padding has flag=0, so
+        # without this drop l0_2_l1() would classify it as a probe-A event and
+        # write an all-zero L1 row. Drop structural padding before probe split.
         df0 = df0.loc[~df0['is_empty_slot']].reset_index(drop=True)
         if df0.empty:
             continue

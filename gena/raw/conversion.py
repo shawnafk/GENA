@@ -44,10 +44,16 @@ def ep_by_index(ep):
 #snid 2 ground
 #this fuction need return, between different levels, make df1 first
 def l0_2_l1(df0, prob = 'a', snid = 1):
-    '''
-    Convert L0 raw to L1  
-    '''
+    """Convert L0 raw slots to L1 for one probe and calibration set.
+
+    Structural padding slots are identified by ``is_empty_slot`` (all 32 raw
+    bytes zero). They are not measurements and are dropped here defensively;
+    decode() also drops them before the probe split so they never reach L1.
+    """
     prob = _normalize_probe(prob)
+    if 'is_empty_slot' in df0.columns:
+        # A flag=0 all-zero slot would otherwise be selected as probe A.
+        df0 = df0.loc[~df0['is_empty_slot'].to_numpy(dtype=bool)]
     if snid not in (1, 2):
         raise ValueError("snid must be 1 (orbit) or 2 (ground)")
     #get num A and B
