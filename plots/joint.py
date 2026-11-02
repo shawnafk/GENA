@@ -15,7 +15,7 @@ import pandas as pd
 from common.frame import TimeSeriesDataFrame
 from libs.regions import REGION_LABELS
 from common.time import Time
-from plots.vis import axes_for_columns as _axes_for_columns, column_groups as _column_groups
+from plots.tools import axes_for_columns as _axes_for_columns, column_groups as _column_groups
 
 __all__ = ["env", "Panel", "overview", "plot_region_code"]
 

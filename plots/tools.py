@@ -7,10 +7,7 @@ import matplotlib.transforms as mtransforms
 from matplotlib.patches import Rectangle
 from matplotlib.axes import Axes
 from lunardate import LunarDate
-import datetime 
-
-plt.rcParams['font.size'] = 14
-plt.rcParams['legend.frameon'] = False
+import datetime
 
 import functools
 from collections.abc import Sequence
@@ -20,6 +17,19 @@ from common.config import resolve_output_path
 
 from libs import ephemeris as epms
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+
+__all__ = [
+    "add_bar_right",
+    "add_bar_top",
+    "auto_loc",
+    "axes_for_columns",
+    "column_groups",
+    "draw_rectangle",
+    "format_lunar_date",
+    "format_pos_date",
+    "pass_axes",
+    "savefig",
+]
 
 
 def savefig( figure, path, *, dpi=300, tight=True, close=True, facecolor="None", **kwargs,):
@@ -271,7 +281,12 @@ def _sat_coord_formatter(x, pos_xyz):
 
 
 def format_pos_date(ax, sat_name='MMS1', *, fontsize=12, max_ticks=8):
-    """Show UTC time and satellite XYZ coordinates on an axis.
+    """Show UTC time and Earth-centred GSM XYZ in Earth radii on an axis.
+
+    Positions come from ``load.load_pos``. Names include THA--THE,
+    ATMS1/ATMS2 (THEMIS B/C), MMS1--MMS4, GOES-N, and QUEQIAO/QQ/GENA.
+    Queqiao's Moon-relative MJ2000 metres are translated to Earth-centred
+    ECI2000 and then converted to GSM; other missions return GSM kilometres.
 
     Each tick position is cached in this formatter closure.  Zooming introduces
     new tick positions, which are interpolated once and then reused on redraw.
@@ -280,6 +295,24 @@ def format_pos_date(ax, sat_name='MMS1', *, fontsize=12, max_ticks=8):
     headings or run outside the figure.  ``fontsize`` controls both the values
     and headings; ``max_ticks`` limits crowding on narrow multi-panel figures.
     """
+    from load import load_pos
+    from common.constants import RE
+    from common.coord import coord
+
+    name = str(sat_name).strip().upper()
+    if name in {'QUEQIAO', 'QQ', 'GENA'}:
+        mission, satellite_id = 'queqiao', None
+    elif name in {'ATMS1', 'ATMS2'}:
+        mission, satellite_id = 'themis', {'ATMS1': 'b', 'ATMS2': 'c'}[name]
+    elif name in {'THA', 'THB', 'THC', 'THD', 'THE'}:
+        mission, satellite_id = 'themis', name[-1].lower()
+    elif name.startswith('MMS') and name[3:] in {'1', '2', '3', '4'}:
+        mission, satellite_id = 'mms', name[3:]
+    elif name.startswith('GOES') and name[4:].lstrip('-').isdigit():
+        mission, satellite_id = 'goes', name[4:].lstrip('-')
+    else:
+        raise ValueError(f'Unsupported satellite name: {sat_name!r}')
+
     auto_loc(ax)
     ax.xaxis.set_major_locator(
         mdates.AutoDateLocator(minticks=4, maxticks=max_ticks)
@@ -291,9 +324,16 @@ def format_pos_date(ax, sat_name='MMS1', *, fontsize=12, max_ticks=8):
             try:
                 dt = mdates.num2date(x, tz=datetime.timezone.utc)
                 positions = np.asarray(
-                    epms.satellites(dt.timestamp(), sat_name),
+                    load_pos(mission, [dt], satellite_id, coord='gsm'),
                     dtype=float,
                 )
+                if mission == 'queqiao':
+                    earth_centred = positions + np.asarray(epms.moon([dt])) * 1000.0
+                    orbit = coord([dt], earth_centred, 'ECI2000', 0)
+                    orbit.convert('GSM')
+                    positions = np.asarray(orbit['GSM'], dtype=float) / RE
+                else:
+                    positions = positions * 1000.0 / RE
                 if positions.shape != (1, 3):
                     raise ValueError(
                         "Satellite ephemeris must return one XYZ row per tick"

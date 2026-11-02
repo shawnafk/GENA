@@ -2,22 +2,41 @@
 THEMIS product plots: multi-panel plots, energy spectra, and
 magnetic-field / plasma time-series for THEMIS probes.
 
-Uses shared plotting plumbing from ``plots.vis`` plus THEMIS-specific panel
+Uses shared plotting plumbing from ``plots.tools`` plus THEMIS-specific panel
 helpers.
 """
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-plt.rcParams["legend.frameon"] = False
-plt.rcParams["font.size"] = 14
-
-# ── Decorator / plumbing from plots.vis ─────────────────────────────
+# ── Decorator / plumbing from plots.tools ───────────────────────────
 from libs import plasma
-from plots import vis
+from plots import tools
+from plots.panels import PanelSpec, plot_panel
 from libs.spectrum import normalize_flux_by_energy_band
-from .timeseries import tplot as _tplot
+from .timeseries import dataset_variable, tplot as _tplot
 from common.time import Time
+
+__all__ = [
+    "esa_spectrum",
+    "esa_sst_spectra",
+    "flux",
+    "get_ma_beta",
+    "overview",
+    "spectrum",
+    "sst_spectrum",
+    "themis",
+    "time_averaged_particle_moments",
+    "time_averaged_spectra",
+    "velocity_parallel_perp",
+]
+
+
+# ---------------------------------------------------------------------------
+# Analysis helpers
+# These operate on already-loaded frames. New report code should calculate
+# statistics outside the plotting layer and pass the results to plot functions.
+# ---------------------------------------------------------------------------
 
 
 def get_ma_beta(fgm, esa, mom, prefix=None, thres_ma=50, thres_bt=50):
@@ -28,10 +47,10 @@ def get_ma_beta(fgm, esa, mom, prefix=None, thres_ma=50, thres_bt=50):
     ``prefix`` accepts either ``"thb"`` or the legacy ``"thb_"`` form.
     Pass ``None`` or ``np.inf`` for a threshold to disable display clipping.
     """
-    _, fgm_B = _variable(fgm, 'fgs_btotal', prefix)
-    _, esa_n = _variable(esa, 'peir_density', prefix)
-    _, esa_T = _variable(esa, 'peir_avgtemp', prefix)
-    _, mom_v = _variable(mom, 'peim_velocity_gsm', prefix)
+    _, fgm_B = dataset_variable(fgm, 'fgs_btotal', prefix)
+    _, esa_n = dataset_variable(esa, 'peir_density', prefix)
+    _, esa_T = dataset_variable(esa, 'peir_avgtemp', prefix)
+    _, mom_v = dataset_variable(mom, 'peim_velocity_gsm', prefix)
     # Use the high-cadence magnetic-field time grid. Source NaNs must be
     # removed before interpolation; scipy.interp1d otherwise propagates them
     # across neighboring intervals and creates artificial gaps.
@@ -53,8 +72,8 @@ def get_ma_beta(fgm, esa, mom, prefix=None, thres_ma=50, thres_bt=50):
     f_n = interpolate_valid(esa_n, esa_n['y'])
     f_T = interpolate_valid(esa_T, esa_T['y'])
     f_v = interpolate_valid(mom_v, np.linalg.norm(mom_v['y'], axis=1))
-    ma = th_MA(fgm_B['y'],f_n,f_v)
-    bt = th_beta(fgm_B['y'],f_n,f_T)
+    ma = plasma.alfven_mach(fgm_B['y'], f_n, f_v)
+    bt = plasma.plasma_beta(fgm_B['y'], f_n, f_T)
 
     ma[ma < 0] = np.nan
     if thres_ma is not None and np.isfinite(thres_ma):
@@ -73,8 +92,8 @@ def velocity_parallel_perp(fgm, mom, prefix=None, max_distance_seconds=60.0):
     magnitude of the remaining vector component. Samples farther than
     ``max_distance_seconds`` from a valid magnetic-field record are left NaN.
     """
-    _, magnetic = _variable(fgm, 'fgs_gsm', prefix)
-    _, velocity = _variable(mom, 'peim_velocity_gsm', prefix)
+    _, magnetic = dataset_variable(fgm, 'fgs_gsm', prefix)
+    _, velocity = dataset_variable(mom, 'peim_velocity_gsm', prefix)
     magnetic_time = np.asarray(Time(magnetic['x']).to_timestamp(), dtype=float)
     velocity_time = np.asarray(Time(velocity['x']).to_timestamp(), dtype=float)
     magnetic_value = np.asarray(magnetic['y'], dtype=float)
@@ -119,58 +138,6 @@ def velocity_parallel_perp(fgm, mom, prefix=None, max_distance_seconds=60.0):
     return pd.DatetimeIndex(velocity['x']), v_parallel, v_perp
 
 
-def th_MA(B, n, v):
-    """Alfvén Mach number for B [nT], n [cm^-3], and v [km/s]."""
-    return v * 1000.0 / plasma.alfven_velocity(B * 1e-5, n, 1)
-
-
-def th_beta(B, n, T):
-    return plasma.beta(n,T,B*1e-5)
-
-
-def _resolve_key(dictset, key, prefix=None):
-    """Resolve a THEMIS variable name against a data dictionary.
-
-    THEMIS variables usually carry a probe prefix such as ``thb_``. This lets
-    callers pass the short product name, e.g. ``peir_velocity_gsm``, and uses
-    the keys already present in ``dictset`` to resolve ``thb_peir_velocity_gsm``.
-    """
-    available = list(dictset.attrs.get("variables", {})) if isinstance(dictset, pd.DataFrame) else list(dictset)
-    if key in available:
-        return key
-    if prefix is not None:
-        prefixed = f"{str(prefix).rstrip('_')}_{key}"
-        if prefixed in available:
-            return prefixed
-
-    suffix = f"_{key}"
-    matches = sorted(k for k in available if k.endswith(suffix))
-    if len(matches) == 1:
-        return matches[0]
-    if len(matches) > 1:
-        raise KeyError(
-            f"Ambiguous THEMIS key {key!r}; matches: {matches}. "
-            "Pass prefix='tha'/'thb'/... to choose one."
-        )
-
-    # Reduced-mode ion spectra are the new loader default; retain plotting
-    # compatibility with older callers that supplied full-mode ``peif`` data.
-    if "peir_" in key:
-        fallback = key.replace("peir_", "peif_", 1)
-        return _resolve_key(dictset, fallback, prefix)
-
-    sample = sorted(available)[:8]
-    raise KeyError(f"Cannot resolve THEMIS key {key!r}. Available examples: {sample}")
-
-
-def _variable(dataset, key, prefix=None):
-    resolved = _resolve_key(dataset, key, prefix)
-    if isinstance(dataset, pd.DataFrame):
-        from plots.basic.timeseries import dataset_variable
-        return dataset_variable(dataset, resolved)
-    return resolved, dataset[resolved]
-
-
 def _spectrum_arrays(product, key, trange=None, prefix=None, *, en=True):
     """Validate and select a THEMIS spectrum.
 
@@ -180,7 +147,7 @@ def _spectrum_arrays(product, key, trange=None, prefix=None, *, en=True):
     """
     if not isinstance(en, (bool, np.bool_)):
         raise TypeError(f"en must be bool, got {type(en).__name__}")
-    resolved, dat = _variable(product, key, prefix=prefix)
+    resolved, dat = dataset_variable(product, key, prefix=prefix)
     try:
         t = pd.DatetimeIndex(pd.to_datetime(dat["x"]))
         flux = np.asanyarray(dat["y"])
@@ -222,7 +189,7 @@ def _spectrum_arrays(product, key, trange=None, prefix=None, *, en=True):
     return resolved, t, energy, flux
 
 
-@vis.pass_axes()
+@tools.pass_axes()
 def spectrum(product, key, trange=None, prefix=None, en=True, f=None, ax=None, **kwargs):
     """Draw one energy spectrum and return its ``QuadMesh`` (no colorbar).
 
@@ -246,13 +213,21 @@ def spectrum(product, key, trange=None, prefix=None, en=True, f=None, ax=None, *
 
 
 # ── Multi-panel THEMIS plots ───────────────────────────────────────────
-def esa_density(esa,ax,trange=None):
-    _tplot(esa, 'peir_density', trange=trange, f=ax.get_figure(), ax=ax, color='k')
-    ax.set_ylabel(r"$n_i (cm^{-3})$",rotation=0,labelpad=30)
-
-def esa_temp(esa,ax,trange=None,**kwargs):
-    _tplot(esa, 'peir_avgtemp', trange=trange, f=ax.get_figure(), ax=ax, **kwargs)
-    ax.set_ylabel(r"$T_i (eV)$",rotation=0,labelpad=30,**kwargs)
+_ESA_DENSITY = PanelSpec(("peir_density",), yscale="log")
+_ESA_TEMP = PanelSpec(("peir_avgtemp",), yscale="log")
+_FGM_BFIELD = PanelSpec(
+    ("fgs_btotal", "fgs_gsm"),
+    ylabel=r"$B_{GSM}$ (nT)",
+    zero=True,
+    legend=True,
+    key_kwargs=({"color": "k"}, {}),
+)
+_MOM_VELOCITY = PanelSpec(
+    ("peim_velocity_gsm",),
+    ylabel=r"$V_{GSM}$ (km/s)",
+    zero=True,
+    legend=True,
+)
 
 
 def _style_spectrum_axis(ax, mesh, ylim, dir, *, en=True):
@@ -268,7 +243,7 @@ def _style_spectrum_axis(ax, mesh, ylim, dir, *, en=True):
     ax.set_ylabel(r"$E \mathrm{(eV)}$",rotation=0,labelpad=30)
 
 #recursive funcition, repeat args, how to eliminiate it
-@vis.pass_axes()
+@tools.pass_axes()
 def esa_spectrum(esa, ax=None, trange=None, *, key='peir_en_eflux', dir='top',
                  prefix=None, en=True, f=None, **kwargs):
     """Draw one ESA spectrum, including its single colorbar."""
@@ -278,7 +253,7 @@ def esa_spectrum(esa, ax=None, trange=None, *, key='peir_en_eflux', dir='top',
     _style_spectrum_axis(ax, im, (10, 25000), dir=dir, en=en)
     return f, ax, im
 
-@vis.pass_axes()
+@tools.pass_axes()
 def sst_spectrum(sst, ax=None, trange=None, *, key='psif_en_eflux', dir='top',
                  prefix=None, en=True, f=None, **kwargs):
     """Draw one SST spectrum, including its single colorbar."""
@@ -288,7 +263,7 @@ def sst_spectrum(sst, ax=None, trange=None, *, key='psif_en_eflux', dir='top',
     _style_spectrum_axis(ax, im, (30000, 200000), dir=dir, en=en)
     return f, ax, im
 
-@vis.pass_axes((2, 1, True, False))
+@tools.pass_axes((2, 1, True, False))
 def esa_sst_spectra(esa, sst, trange=None, *, esa_key='peir_en_eflux',
                     sst_key='psif_en_eflux', dir='top',prefix=None,
                     shared_color_scale=False, en=True, f=None, ax=None,
@@ -340,20 +315,6 @@ def esa_sst_spectra(esa, sst, trange=None, *, esa_key='peir_en_eflux',
 
 #fgm
 #B field gsm and btotal spin resolution
-def fgm_bfield(fgm,ax,trange=None):
-    _tplot(fgm, 'fgs_btotal', trange=trange, f=ax.get_figure(), ax=ax, color='k')
-    _tplot(fgm, 'fgs_gsm', trange=trange, f=ax.get_figure(), ax=ax)
-    ax.axhline(0,ls='--',color='k')
-    ax.set_ylabel(r"$B_{GSM} \mathrm{(nT)}$",rotation=0,labelpad=30)
-    ax.legend()
-
-
-def mom_velocity(mom, ax, trange=None):
-    _tplot(mom, 'peim_velocity_gsm', trange=trange, f=ax.get_figure(), ax=ax)
-    ax.axhline(0, ls='--', color='k')
-    ax.set_ylabel(r"$V_{GSM} \mathrm{(km/s)}$", rotation=0, labelpad=30)
-    ax.legend()
-
 def themis(esa, mom, fgm, panels=5, trange=None, en=True, f=None, ax=None):
     if panels not in (3, 5, 7):
         raise ValueError(f"themis() supports panels in (3, 5, 7), got {panels!r}")
@@ -367,32 +328,32 @@ def themis(esa, mom, fgm, panels=5, trange=None, en=True, f=None, ax=None):
         if f is None:
             f = ax[0].get_figure()
     if panels == 3:
-        esa_density(esa, ax[0], trange=trange)
+        plot_panel(esa, _ESA_DENSITY, trange=trange, f=f, ax=ax[0])
         axb = ax[0].twinx()
-        esa_temp(esa, axb, trange=trange, color="r")
+        _tplot(esa, 'peir_avgtemp', trange=trange, f=f, ax=axb, color="r")
         ax[0].set_yscale("log")
         axb.set_yscale("log")
         ax[0].axhline(0.03, ls="--")
-        mom_velocity(mom, ax[1], trange=trange)
-        fgm_bfield(fgm, ax[2], trange=trange)
+        plot_panel(mom, _MOM_VELOCITY, trange=trange, f=f, ax=ax[1])
+        plot_panel(fgm, _FGM_BFIELD, trange=trange, f=f, ax=ax[2])
     elif panels == 5:
-        esa_density(esa, ax[0], trange=trange)
-        esa_temp(esa, ax[1], trange=trange)
+        plot_panel(esa, _ESA_DENSITY, trange=trange, f=f, ax=ax[0])
+        plot_panel(esa, _ESA_TEMP, trange=trange, f=f, ax=ax[1])
         for i in range(2):
             ax[i].set_yscale("log")
         ax[0].axhline(0.03, ls="--")
-        esa_spectrum(esa, ax[2], trange=trange, en=en)
-        mom_velocity(mom, ax[3], trange=trange)
-        fgm_bfield(fgm, ax[4], trange=trange)
+        esa_spectrum(esa, ax[2], trange=trange, en=en, f=f)
+        plot_panel(mom, _MOM_VELOCITY, trange=trange, f=f, ax=ax[3])
+        plot_panel(fgm, _FGM_BFIELD, trange=trange, f=f, ax=ax[4])
     elif panels == 7:
-        esa_density(esa, ax[0], trange=trange)
-        esa_temp(esa, ax[1], trange=trange)
+        plot_panel(esa, _ESA_DENSITY, trange=trange, f=f, ax=ax[0])
+        plot_panel(esa, _ESA_TEMP, trange=trange, f=f, ax=ax[1])
         for i in range(2):
             ax[i].set_yscale("log")
         ax[0].axhline(0.03, ls="--")
-        esa_spectrum(esa, ax[2], trange=trange, en=en)
-        mom_velocity(mom, ax[3], trange=trange)
-        fgm_bfield(fgm, ax[4], trange=trange)
+        esa_spectrum(esa, ax[2], trange=trange, en=en, f=f)
+        plot_panel(mom, _MOM_VELOCITY, trange=trange, f=f, ax=ax[3])
+        plot_panel(fgm, _FGM_BFIELD, trange=trange, f=f, ax=ax[4])
         t, ma, beta = get_ma_beta(fgm, esa, mom)
         ax[5].plot(pd.to_datetime(t, unit="s"), ma)
         ax[6].plot(pd.to_datetime(t, unit="s"), beta)
@@ -402,6 +363,46 @@ def themis(esa, mom, fgm, panels=5, trange=None, en=True, f=None, ax=None):
     return f, ax
 
 
+def overview(esa=None, mom=None, fgm=None, *, trange=None, en=True, f=None, ax=None):
+    """Compose the THEMIS products that are actually available.
+
+    ``themis()`` is the fixed 3/5/7-panel layout and requires all three
+    products. Quick-look callers often have only one or two products; this
+    helper builds a vertical stack from whichever of ``esa``, ``mom`` and
+    ``fgm`` are supplied, preserving each product's native time axis.
+    """
+    if esa is None and mom is None and fgm is None:
+        raise ValueError("at least one of esa, mom or fgm is required")
+
+    panel_count = (3 if esa is not None else 0)
+    panel_count += 1 if mom is not None else 0
+    panel_count += 1 if fgm is not None else 0
+    f, axes = tools.axes_for_columns(panel_count, f=f, ax=ax, sharex=True)
+    index = 0
+    if esa is not None:
+        plot_panel(esa, _ESA_DENSITY, trange=trange, f=f, ax=axes[index])
+        axes[index].set_yscale("log")
+        index += 1
+        plot_panel(esa, _ESA_TEMP, trange=trange, f=f, ax=axes[index])
+        axes[index].set_yscale("log")
+        index += 1
+        esa_spectrum(esa, axes[index], trange=trange, en=en, f=f)
+        index += 1
+    if mom is not None:
+        plot_panel(mom, _MOM_VELOCITY, trange=trange, f=f, ax=axes[index])
+        index += 1
+    if fgm is not None:
+        plot_panel(fgm, _FGM_BFIELD, trange=trange, f=f, ax=axes[index])
+        index += 1
+
+    axes[-1].set_xlabel("Time (UTC)")
+    f.autofmt_xdate()
+    return f, axes
+
+
+# ---------------------------------------------------------------------------
+# Spectrum and moment analysis retained below for existing THEMIS workflows.
+# ---------------------------------------------------------------------------
 def time_averaged_spectra(esa, sst, tspan=None, *, esa_key='peir_en_eflux',
                           sst_key='psif_en_eflux', prefix=None, en=True,
                           normalized=False, E_norm=None):
@@ -490,7 +491,7 @@ def _time_averaged_product_moments(
     """
 
     def samples(key, components=None):
-        resolved, variable = _variable(product, key, prefix=prefix)
+        resolved, variable = dataset_variable(product, key, prefix=prefix)
         try:
             times = pd.DatetimeIndex(pd.to_datetime(variable['x']))
             values = np.ma.filled(

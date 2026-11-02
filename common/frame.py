@@ -191,7 +191,7 @@ class TimeIndexedDataFrame(pd.DataFrame):
         The plotting import is intentionally lazy so the data contract does not
         depend on Matplotlib at import time.
         """
-        from plots.basic import tplot
+        from plots import tplot
 
         if f is not None:
             kwargs["f"] = f
@@ -427,10 +427,10 @@ def _sync_values(source_ns, values, target_ns, max_gap_ns, *, method):
 
 
 def concat(frames: Sequence[pd.DataFrame]):
-    """Concatenate frames, sort and deduplicate UTC timestamps, and merge metadata.
+    """Concatenate frames in input order, retaining all rows, and merge metadata.
 
-    Rows are concatenated with pandas' column-union rules, stably sorted by
-    ``Datetime``, and duplicate timestamps keep their first row. The first
+    Rows are concatenated with pandas' column-union rules, without sorting or
+    deduplicating timestamps, and the index is reset. The first
     frame's concrete constructor and attributes are preserved; all
     ``attrs["variables"]`` mappings are merged in input order. Empty input
     returns an empty :class:`TimeSeriesDataFrame`.
@@ -447,12 +447,6 @@ def concat(frames: Sequence[pd.DataFrame]):
         table.attrs = {}
         tables.append(table)
     result = frames[0]._constructor(pd.concat(tables, ignore_index=True, sort=False))
-    if "Datetime" in result:
-        result = (
-            result.sort_values("Datetime", kind="stable")
-            .drop_duplicates("Datetime", keep="first")
-            .reset_index(drop=True)
-        )
     result.attrs = dict(frames[0].attrs)
     variables = {}
     for frame in frames:

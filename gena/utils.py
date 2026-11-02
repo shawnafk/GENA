@@ -10,7 +10,7 @@ import pandas as pd
 from common.constants import RE
 from common.coord import coord as Coord
 from gena.frame import _row_rotations
-from plots.vis import axes_for_columns as _axes_for_columns, column_groups as _column_groups
+from plots.tools import axes_for_columns as _axes_for_columns, column_groups as _column_groups
 
 __all__ = [
     "get_velocity",
@@ -163,7 +163,7 @@ def orbit(
 ):
     """Plot the QQ orbit and nominal FOV intersections with coordinate planes.
 
-    ``cols`` follows the dynamic-panel convention of ``plots.advance.env``. The
+    ``cols`` follows the dynamic-panel convention of ``plots.joint.env``. The
     default layout groups the three spacecraft coordinates and the two varying
     coordinates on each of the XY, XZ, and YZ intersection planes.
     """

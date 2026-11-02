@@ -10,6 +10,8 @@ requires-python = ">=3.12,<3.15"
 dependencies = [
     "astropy>=7,<9",
     "imageio-ffmpeg>=0.6,<1", # Bundled ffmpeg executable for MP4 export.
+    "jplephem>=2.22,<3",
+    "lunardate>=0.2,<1",
     "matplotlib>=3.9,<4",
     "numpy>=2,<3",
     "pandas>=3,<4",
@@ -22,6 +24,8 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=8,<10"]
+excel = ["openpyxl>=3.1,<4"]
+3d = ["geopack>=1.0,<2"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

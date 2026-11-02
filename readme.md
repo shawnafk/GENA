@@ -56,16 +56,16 @@ GENA-CODE/
 | Principle | Implementation |
 |-----------|---------------|
 | **Loading is centralized** | `load` organizes source parsers, frame assembly, and named mission loaders in one module |
-| **Shared infrastructure is centralized** | Coordinates, time and types live in `common/`; plotting helpers live in `plots.vis` |
+| **Shared infrastructure is centralized** | Coordinates, time and types live in `common/`; plotting helpers live in `plots.tools` |
 | **Cross-mission coordination via composition** | Analysis scripts import from multiple mission packages as needed |
 | **No circular dependencies** | Loaders depend on data types; plotting composes science functions. DataFrame.tplot imports plotting lazily. |
 | **Public API via `__init__.py`** | Each package exports only what other packages should import |
 
 ### Dependency Flow
 
-Analysis scripts call mission loaders and `plots`. `plots.advance` composes product panels from `plots.basic`; both reuse `plots.vis`. Plotting does not implicitly synchronize or download data. Mission plotting implementations now live only in `plots.basic`; GENA report orchestration calls `plots`.
+Analysis scripts call mission loaders and `plots`. `plots.joint` composes product panels from the flat mission modules; all plotting code reuses `plots.tools`. Plotting does not implicitly synchronize or download data. GENA report orchestration calls `plots`.
 
-See [the plotting guide](docs/plots.md) for joint-figure examples and migration details.
+See [the plotting guide](plots/plots.md) for joint-figure examples and migration details.
 
 The `load` package exports only `load`, `load_pos`, and `load_sw`; mission readers such as `load_gena` and `load_spedas` remain internal modules.
 
@@ -77,14 +77,14 @@ Imports follow a consistent pattern through the unified `load` package:
 # GENA ENA data
 from load import load
 from gena.frame import ParameterDataFrame, ParticleDataFrame
-from plots.basic import gena as gena_vis
+from plots import gena as gena_vis
 
 # THEMIS in-situ
-from plots.basic.themis import themis as plot_themis, flux
-from plots.basic.themis import get_ma_beta
+from plots.themis import themis as plot_themis, flux
+from plots.themis import get_ma_beta
 
 # MMS in-situ
-from plots.basic.mms import fpi, hpca
+from plots.mms import fpi, hpca
 
 # OMNI solar wind + indices
 from load import load_sw
@@ -185,7 +185,7 @@ Loaders map source time fields to `Datetime` and supply `Timestamp` (Unix second
 - `select_by(other, condition)` synchronizes a condition from another frame onto this frame's timestamps, then returns matching original rows without changing this frame's measured values.
 - `between(boundaries)` returns slices between consecutive time boundaries.
 - `split(tgap)` sorts by `Datetime` and splits the frame at gaps larger than `tgap` seconds.
-- `tplot(variable, ...)` delegates scalar/vector plotting to `plots.basic.tplot`.
+- `tplot(variable, ...)` delegates scalar/vector plotting to `plots.tplot`.
 - `concat(frames)` concatenates interval results while preserving type and provenance metadata.
 
 GENA-only behavior remains in `gena.frame` or the rest of the `gena` package: PDF position and attitude interpolation, event filtering, detector response, energy and species products, projection, and ENA statistics. Particle positions and attitudes are read directly from their event rows. THEMIS/MMS/OMNI/index loading and mission-specific spectral plotting remain in their own packages.
@@ -329,7 +329,7 @@ sw = load_sw(t)                          # → {'Pressure', 'BY_GSM', 'BZ_GSM', 
 
 1. Add the source parser, explicit variable layouts, backend helper, and named `load_<mission>()` wrapper to `load/load.py`, then export the public loader from `load/__init__.py`.
 2. Have the parser produce the variable descriptions required by `assemble()`, and return `TimeSeriesDataFrame` by default from the named loader.
-3. Add product plots in `plots/basic/<mission>.py`, reusing `plots.vis`.
+3. Add product plots in `plots/<mission>.py`, reusing `plots.tools`.
 4. Use `common.config.resolve_paths()` for pure path parsing and `common.config.configure()` or `get_configured_paths()` when I/O paths must be validated.
 5. For coordinate transforms, import from `common.coord`.
 6. Put reusable cross-mission calculations in `libs/` and study-specific orchestration in analysis scripts.

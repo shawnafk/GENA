@@ -56,7 +56,7 @@ GENA-CODE-Dev/
 | 原则 | 实现方式 |
 |------|----------|
 | 加载流程集中组织 | `load` 在同一模块中组织来源解析、时间序列表组装和具名任务加载器 |
-| 共享基础设施集中管理 | 时间、表格同步、坐标、几何和插值放在 `common/`，通用绘图在 `plots.vis` |
+| 共享基础设施集中管理 | 时间、表格同步、坐标、几何和插值放在 `common/`，通用绘图在 `plots.tools` |
 | 跨任务物理模型独立管理 | 等离子体、星历和空间环境模型放在 `libs/` |
 | 跨任务分析采用组合方式 | 分析脚本分别加载各任务数据，再显式对齐和组合 |
 | 依赖方向单一 | 分析层依赖任务包和 `libs`，任务包与 `libs` 依赖 `common` |
@@ -69,16 +69,16 @@ flowchart TD
     A["分析脚本 / 1.Paper_BBF"] --> G["gena"]
     A --> D["load"]
     A --> L["libs"]
-    A --> P["plots.advance"]
-    P --> B["plots.basic"]
+    A --> P["plots（joint + mission modules）"]
+    P --> B["plots.tools"]
     B --> C["common"]
-    B --> G
+    P --> G
     G --> C["common"]
     D --> C
     L --> C
 ```
 
-任务加载和计算保持独立。分析脚本分别加载数据后，通过 `plots.advance` 组织联合图；仅在跨数据源计算确有需要时显式同步时间采样。GENA 报告编排调用 `plots`；旧 `*.vis` 路径已移除。示例见[绘图模块说明](docs/plots.md)。
+任务加载和计算保持独立。分析脚本分别加载数据后，通过 `plots.joint` 组织联合图；仅在跨数据源计算确有需要时显式同步时间采样。GENA 报告编排调用 `plots`；旧 `plots.basic`、`plots.advance` 和 `plots.vis` 路径已移除。示例见[绘图模块说明](plots/plots.md)。
 
 任务加载器统一通过 `load` 包中的具名函数暴露；原来的分任务加载模块已删除，不保留兼容层。
 
@@ -88,14 +88,14 @@ flowchart TD
 # GENA ENA 数据
 from load import load
 from gena.frame import ParameterDataFrame, ParticleDataFrame
-from plots.basic import gena as gena_vis
+from plots import gena as gena_vis
 from gena.post import statistic as gena_stat
 
 # THEMIS 原位探测数据
-from plots.basic.themis import themis as plot_themis, flux, get_ma_beta
+from plots.themis import themis as plot_themis, flux, get_ma_beta
 
 # MMS 原位探测数据
-from plots.basic.mms import fpi, hpca
+from plots.mms import fpi, hpca
 
 # OMNI 太阳风和地磁指数
 from load import load_sw
@@ -196,7 +196,7 @@ loader 将来源时间字段映射为 `Datetime`，并按任务需要提供 `Tim
 - `select(condition)` 选择数据行，并保留具体子类和 `attrs` 元数据。
 - `between(boundaries)` 按连续时间边界返回多个数据片段。
 - `split(tgap)` 按 `Datetime` 排序，并在相邻记录间隔大于 `tgap` 秒时切分数据表。
-- `tplot(variable, ...)` 将标量或矢量绘图委托给 `plots.basic.tplot`。
+- `tplot(variable, ...)` 将标量或矢量绘图委托给 `plots.tplot`。
 - `concat(frames)` 拼接多个时间区间的结果，同时保留具体类型和来源元数据。
 
 GENA 专用行为继续由 `gena.frame` 或 `gena` 包的其他模块负责，包括 PDF 位置姿态插值、事件过滤、探测器响应、能量和粒子种类产品、空间投影以及 ENA 统计。粒子位置和姿态由投影代码直接读取事件行。THEMIS、MMS、OMNI、地磁指数的加载和任务专用能谱绘图仍留在各自包中。
@@ -364,7 +364,7 @@ THEMIS、MMS、OMNI 和地磁指数加载器可能访问网络。代码审查和
 1. 在 `load/load.py` 中添加数据源 parser、明确的变量 layout、后端辅助函数和命名为 `load_<mission>()` 的加载器，再从 `load/__init__.py` 导出公开入口。
 2. parser 将源数据整理成 `assemble()` 所需的变量说明，命名加载器默认返回 `TimeSeriesDataFrame`；确有旧式字典调用需求时再提供 `return_type="dict"`。
 3. 在命名加载器中明确解释产品字段、时间轴、分量和附加轴；`assemble()` 只验证并组装这些变量说明，共享类型不处理存储格式。
-4. 在 `plots/basic/<mission>.py` 中实现任务专用绘图，并复用 `plots.vis` 的坐标轴和通用时序绘图基础设施。
+4. 在 `plots/<mission>.py` 中实现任务专用绘图，并复用 `plots.tools` 的坐标轴和通用时序绘图基础设施。
 5. 使用 `common.config.resolve_paths()` 进行只读路径解析；真正读写前使用 `configure()` 或 `get_configured_paths()` 校验路径。
 6. 坐标变换和几何运算使用 `common.coord`，时间解析使用 `common.time`，连续量表同步使用 `TimeSeriesDataFrame`，插值工具使用 `common.interp`。
 7. 不得从其他任务包横向导入。跨任务分析应在分析脚本中分别加载各任务数据并显式组合。

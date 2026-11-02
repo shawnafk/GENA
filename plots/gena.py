@@ -10,8 +10,7 @@ from scipy.stats import gaussian_kde
 from gena import filter as flt
 from gena.constants import init_param
 from gena.post import statistic as sts
-from plots import vis
-from plots import vis as _vis_utils
+from plots import tools
 from common.interp import i1d
 def _interpolate_nonzero_parameter(pdf, name):
     """Fill zero-valued engineering samples for plotting only."""
@@ -29,7 +28,7 @@ def _interpolate_nonzero_parameter(pdf, name):
         fill_value="extrapolate",
     )(timestamp)
 
-@vis.pass_axes()
+@tools.pass_axes()
 def energy(l2, scale='log', E_bin=None, f=None, ax=None, **kwargs):
     if scale not in ('log', 'linear'):
         raise ValueError(f"Unsupported scale: {scale!r}")
@@ -46,7 +45,7 @@ def energy(l2, scale='log', E_bin=None, f=None, ax=None, **kwargs):
     return f, ax
 
 
-@vis.pass_axes()
+@tools.pass_axes()
 def layer(l2_df, layer=1, xyrange=None, f=None, ax=None, **kwargs):
     if xyrange is None:
         xyrange = [np.arange(-100, 100, 1), np.arange(-50, 50, 1)]
@@ -54,8 +53,8 @@ def layer(l2_df, layer=1, xyrange=None, f=None, ax=None, **kwargs):
         im = ax.hist2d(l2_df['X1'], l2_df['Y1'], xyrange, **kwargs)
     if 2 == layer:
         im = ax.hist2d(l2_df['X2'], l2_df['Y2'], xyrange, **kwargs)
-    _vis_utils.draw_rectangle(ax, 90, 30)
-    _vis_utils.draw_rectangle(ax, 150, 60)
+    tools.draw_rectangle(ax, 90, 30)
+    tools.draw_rectangle(ax, 150, 60)
     f.colorbar(im[3], ax=ax)
     ax.set_xlabel('X mm')
     ax.set_ylabel('Y mm')
@@ -64,29 +63,29 @@ def layer(l2_df, layer=1, xyrange=None, f=None, ax=None, **kwargs):
     return f, ax
 
 
-@vis.pass_axes()
+@tools.pass_axes()
 def fov(l2, xrange=None, yrange=None, fxy=(59.86, 19.5), sxy=(45.06, 9.85), f=None, ax=None, **kwargs):
     if xrange is None:
         xrange = np.arange(-35, 35, 2.5)
     if yrange is None:
         yrange = np.arange(-20, 20, 2.5)
     h = ax.hist2d(l2['PX'], l2['PY'], [xrange, yrange], **kwargs)
-    _vis_utils.draw_rectangle(ax, *fxy)
-    _vis_utils.draw_rectangle(ax, *sxy)
+    tools.draw_rectangle(ax, *fxy)
+    tools.draw_rectangle(ax, *sxy)
     ax.set_aspect('equal')
-    plt.colorbar(h[3], ax=ax)
+    f.colorbar(h[3], ax=ax)
     ax.set_xlabel('AX deg')
     ax.set_ylabel('AY deg')
     f.autofmt_xdate()
     return f, ax
 
 
-@vis.pass_axes(subplot_spec=(2, 1, True, False))
-def ho_ratio(l2, f=None, ax=None):
+@tools.pass_axes(subplot_spec=(2, 1, True, False))
+def ho_ratio(l2, window='5min', f=None, ax=None,**kwargs):
     l2_H = l2[l2['Spec'] == 1]
     l2_O = l2[l2['Spec'] == 2]
-    tH_n, nH_flux, _ = l2_H.window_hist0d(window='60min')
-    tO_n, nO_flux, _ = l2_O.window_hist0d(window='60min')
+    tH_n, nH_flux, _ = l2_H.window_hist0d(window=window, **kwargs)
+    tO_n, nO_flux, _ = l2_O.window_hist0d(window=window, **kwargs)
 
     ax[0].plot(tH_n, nH_flux, label='H')
     ax[0].plot(tO_n, nO_flux, label='O')
@@ -99,7 +98,7 @@ def ho_ratio(l2, f=None, ax=None):
     return f, ax
 
 
-@vis.pass_axes(subplot_spec=(3, 1, True, False))
+@tools.pass_axes(subplot_spec=(3, 1, True, False))
 def ep_tof(l2, f=None, ax=None, **kwargs):
     idx_H = l2['Spec'] == 1
     idx_O = l2['Spec'] == 2
@@ -114,7 +113,7 @@ def ep_tof(l2, f=None, ax=None, **kwargs):
     return f, ax
 
 
-@vis.pass_axes(subplot_spec=(3, 1, True, False))
+@tools.pass_axes(subplot_spec=(3, 1, True, False))
 def ep_energy_per_nucleon(l2, f=None, ax=None, **kwargs):
     idx_H = l2['Spec'] == 1
     idx_O = l2['Spec'] == 2
@@ -144,16 +143,16 @@ def _meshvalues(df, vnames, vb, win, f=None, ax=None):
     vmin = min(10.0, max(1.0, vmax / 10.0))
     for _ax, hist_matrix in zip(ax, all_hist_matrix):
         mesh = _ax.pcolormesh(times, bin_centers, hist_matrix.T, cmap='viridis', shading='nearest', norm=LogNorm(vmin=vmin, vmax=vmax))
-    _vis_utils.add_bar_top(ax[0], mesh)
+    tools.add_bar_top(ax[0], mesh)
 
 
-@vis.pass_axes()
+@tools.pass_axes()
 def meshvalues(df, vnames, vb, win, f=None, ax=None):
     _meshvalues(df, vnames, vb, win, f=f, ax=ax)
     return f, ax
 
 
-@vis.pass_axes(subplot_spec=(4, 1, True, False))
+@tools.pass_axes(subplot_spec=(4, 1, True, False))
 def start_signal(l1_df, *, f=None, ax=None, win='5min'):
     vnames = ['TX_1s', 'TX_2s', 'TY_1s', 'TY_2s']
     _meshvalues(l1_df, vnames, np.arange(1, 100, 2), win, f=f, ax=ax)
@@ -166,7 +165,7 @@ def start_signal(l1_df, *, f=None, ax=None, win='5min'):
     return f, ax
 
 
-@vis.pass_axes(subplot_spec=(4, 1, True, False))
+@tools.pass_axes(subplot_spec=(4, 1, True, False))
 def end_signal(l1_df, f=None, ax=None, win='5min'):
     vnames = ['TX_1e', 'TX_2e', 'TY_1e', 'TY_2e']
     _meshvalues(l1_df, vnames, np.arange(1, 700, 2), win, f=f, ax=ax)
@@ -176,7 +175,7 @@ def end_signal(l1_df, f=None, ax=None, win='5min'):
     return f, ax
 
 
-@vis.pass_axes(subplot_spec=(2, 1, True, False))
+@tools.pass_axes(subplot_spec=(2, 1, True, False))
 def channels(l1a, f=None, ax=None):
     for name in ['TX_1s', 'TX_2s', 'TY_1s', 'TY_2s']:
         t, h, _ = sts.hist0d_xy(l1a, name)
@@ -191,7 +190,7 @@ def channels(l1a, f=None, ax=None):
     return f, ax
 
 
-@vis.pass_axes(subplot_spec=(4, 1, True, False))
+@tools.pass_axes(subplot_spec=(4, 1, True, False))
 def parameters(pdf, flag, show_temp=True, f=None, ax=None, **kwargs):
     t_date = pdf['Datetime']
     if flag == 'a':
@@ -214,8 +213,7 @@ def parameters(pdf, flag, show_temp=True, f=None, ax=None, **kwargs):
             ax[3].plot(t_date, _interpolate_nonzero_parameter(pdf, 'Temp_B'), **kwargs)
         ax[2].legend(frameon=False, ncol=3)
     else:
-        print('name not correct')
-        exit(1)
+        raise ValueError("flag must be 'a' or 'b'")
     ax[0].set_ylabel('Volt')
     ax[0].set_ylim(2600, 3000)
     ax[1].set_ylabel('MCP')
@@ -230,7 +228,7 @@ def parameters(pdf, flag, show_temp=True, f=None, ax=None, **kwargs):
     return f, ax
 
 
-@vis.pass_axes()
+@tools.pass_axes()
 def counts( dfs, vmax=16 * 62 * 60 * 5, *, window='5min', labels=None, f=None, ax=None,):
     """Plot time-binned counts for one or more event products."""
     dfs = list(dfs)
@@ -265,7 +263,7 @@ def counts( dfs, vmax=16 * 62 * 60 * 5, *, window='5min', labels=None, f=None, a
     return f, ax
 
 
-@vis.pass_axes(subplot_spec=(4, 3, False, False))
+@tools.pass_axes(subplot_spec=(4, 3, False, False))
 def histogram(l1_df, df_tot=None, uuid=None, pid=None, params=init_param(1), prob='a', *, f=None, ax=None):
     p = prob.upper()
     centers = [params[f'{p}_X_SUM'], params[f'{p}_Y_SUM']]
@@ -301,7 +299,7 @@ def histogram(l1_df, df_tot=None, uuid=None, pid=None, params=init_param(1), pro
     return f, ax
 
 
-@vis.pass_axes(subplot_spec=(2, 2, True, True))
+@tools.pass_axes(subplot_spec=(2, 2, True, True))
 def joint(df, *, f=None, ax=None):
     idx = 0
     for d in ['X', 'Y']:
@@ -327,7 +325,7 @@ def joint(df, *, f=None, ax=None):
     return f, ax
 
 
-@vis.pass_axes(subplot_spec=(2, 2, True, True))
+@tools.pass_axes(subplot_spec=(2, 2, True, True))
 def scatter_joint(df, row_id, f=None, ax=None):
     idx = 0
     for d in ['X', 'Y']:
@@ -351,7 +349,7 @@ def _add_value_labels(ax, labels, values, bottoms=None):
             height = bar.get_height()
             ax.text(bar.get_x() + bar.get_width() / 2., bottom + height, f'{value}', ha='center', va='center', color='black', fontsize=8)
 
-@vis.pass_axes()
+@tools.pass_axes()
 def filter(l1, f=None, ax=None, **kwargs):
     xlabel = ['L0', 'triggered', 'start_stop', 'start_ns', 'golden_match']
 
@@ -400,7 +398,7 @@ def _distribution_bins(prob, ssid, kind):
     return xbins, xlabels, ybins, ylabels
 
 
-@vis.pass_axes()
+@tools.pass_axes()
 def distribution(df, prob, ssid=1, channels=None, include_zero=True, kind='4', f=None, ax=None):
     bins = _distribution_bins(prob, ssid, kind)
     if bins is None:
@@ -435,7 +433,7 @@ def distribution(df, prob, ssid=1, channels=None, include_zero=True, kind='4', f
     return f, ax
 
 
-@vis.pass_axes(subplot_spec=(2, 1, False, False))
+@tools.pass_axes(subplot_spec=(2, 1, False, False))
 def match_distribution(df, folder='./', gap=10, f=None, ax=None):
     sumx = df['TX_1s'] + df['TX_2s']
     sumy = df['TY_1s'] + df['TY_2s']
@@ -457,7 +455,7 @@ def match_distribution(df, folder='./', gap=10, f=None, ax=None):
     return f, ax
 
 
-@vis.pass_axes(subplot_spec=(1, 2, True, True))
+@tools.pass_axes(subplot_spec=(1, 2, True, True))
 def sum_xy(df, params=init_param(1), prob='a', f=None, ax=None):
     CX = params['A_X_SUM'] if prob == 'a' else params['B_X_SUM']
     CY = params['A_Y_SUM'] if prob == 'a' else params['B_Y_SUM']
@@ -473,7 +471,7 @@ def sum_xy(df, params=init_param(1), prob='a', f=None, ax=None):
     return f, ax
 
 
-@vis.pass_axes(subplot_spec=(1, 2, True, True))
+@tools.pass_axes(subplot_spec=(1, 2, True, True))
 def diff_xy(df, params=init_param(1), prob='a', f=None, ax=None):
     XL, XR = (params['A_XL'], params['A_XR']) if prob == 'a' else (params['B_XL'], params['B_XR'])
     YL, YR = (params['A_YL'], params['A_YR']) if prob == 'a' else (params['B_YL'], params['B_YR'])
@@ -495,7 +493,7 @@ def diff_xy(df, params=init_param(1), prob='a', f=None, ax=None):
     return f, ax
 
 
-@vis.pass_axes(subplot_spec=(2, 1, False, False))
+@tools.pass_axes(subplot_spec=(2, 1, False, False))
 def start_end_level2(df, msize=1, s_or_hist=1, f=None, ax=None):
     ax1, ax2 = ax
     if s_or_hist == 0:
@@ -515,10 +513,10 @@ def start_end_level2(df, msize=1, s_or_hist=1, f=None, ax=None):
         xy = np.vstack([df['X2'], df['Y2']])
         z = 1 - gaussian_kde(xy)(xy)
         ax2.scatter(df['X2'], df['Y2'], c=z, s=1, cmap='Spectral')
-    _vis_utils.draw_rectangle(ax1, 90, 30)
-    _vis_utils.draw_rectangle(ax2, 90, 30)
-    _vis_utils.draw_rectangle(ax1, 150, 60)
-    _vis_utils.draw_rectangle(ax2, 150, 60)
+    tools.draw_rectangle(ax1, 90, 30)
+    tools.draw_rectangle(ax2, 90, 30)
+    tools.draw_rectangle(ax1, 150, 60)
+    tools.draw_rectangle(ax2, 150, 60)
     ax1.set_xlabel('X (mm)')
     ax1.set_ylabel('Y (mm)')
     ax2.set_xlabel('X (mm)')
@@ -526,7 +524,7 @@ def start_end_level2(df, msize=1, s_or_hist=1, f=None, ax=None):
     return f, ax
 
 
-@vis.pass_axes()
+@tools.pass_axes()
 def tdc_bar(df, cnl, channel=None, f=None, ax=None):
     series = df[cnl]
     zero_count = (series == -94 * 0.081).sum()

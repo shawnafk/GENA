@@ -4,7 +4,8 @@ import numpy as np
 import pandas as pd
 
 from common.frame import read_variable
-from plots.vis import pass_axes
+from plots.labels import VariableInfo, axis_label, describe
+from plots.tools import pass_axes
 
 __all__ = ["tplot"]
 
@@ -62,7 +63,14 @@ def dataset_variable(data, key, prefix=None):
         metadata = data.attrs.get("variables", {})
         if resolved in metadata:
             variable = read_variable(data, resolved)
-            return resolved, {"x": variable["time"], "y": variable["values"], **variable["axes"]}
+            info = metadata[resolved]
+            return resolved, {
+                "x": variable["time"],
+                "y": variable["values"],
+                **variable["axes"],
+                "label": info.get("label"),
+                "units": info.get("units"),
+            }
         dates = pd.to_datetime(data["Datetime"] if "Datetime" in data else data["Timestamp"], unit=None if "Datetime" in data else "s")
         values = data[resolved].to_numpy()
         mask = ~pd.isna(values)
@@ -72,7 +80,14 @@ def dataset_variable(data, key, prefix=None):
 
 @pass_axes()
 def tplot( data, key=None, trange=None, prefix=None, f=None, ax=None, label=None, component_labels=None, **kwargs,):
-    """Plot one scalar or three-component time-series variable."""
+    """Plot one scalar or three-component time-series variable.
+
+    Display labels and units come from ``plots.labels`` unless the caller or
+    the loader metadata supplies them. The theme controls styling; this
+    function only draws data that the caller has already loaded.
+    """
+    resolved = None
+    info = VariableInfo()
     if key is None and isinstance(data, dict) and {"x", "y"}.issubset(data):
         variable = data
     else:
@@ -85,8 +100,16 @@ def tplot( data, key=None, trange=None, prefix=None, f=None, ax=None, label=None
                 )
             key = available[0]
         resolved, variable = dataset_variable(data, key, prefix=prefix)
-        if label is None:
-            label = resolved
+        info = describe(resolved)
+        if variable.get("label") or variable.get("units"):
+            info = VariableInfo(
+                label=variable.get("label") or info.label,
+                unit=variable.get("units") or info.unit,
+                scale=info.scale,
+            )
+
+    if label is None:
+        label = variable.get("label") or info.label or resolved or "value"
 
     t = pd.to_datetime(variable["x"])
     y = np.asarray(variable["y"])
@@ -96,13 +119,11 @@ def tplot( data, key=None, trange=None, prefix=None, f=None, ax=None, label=None
         t = t[selected_idx]
         y = y[selected_idx]
 
-    if label is None:
-        label = variable.get("label")
     if y.ndim == 1:
         ax.plot(t, y, label=label, **kwargs)
     elif y.ndim == 2 and y.shape[1] == 3:
         if component_labels is None:
-            base = label or ""
+            base = resolved or label or ""
             component_labels = [f"{base}_{suffix}" if base else suffix for suffix in ("x", "y", "z")]
         colors = ["r", "g", "b"]
         for i, comp_label in enumerate(component_labels):
@@ -111,5 +132,11 @@ def tplot( data, key=None, trange=None, prefix=None, f=None, ax=None, label=None
             ax.plot(t, y[:, i], label=comp_label, **line_kwargs)
     else:
         raise ValueError(f"y should be 1-D or shape (N, 3), got {y.shape}")
-    return f, ax
 
+    # Leave an explicitly supplied ylabel untouched; otherwise fill it from
+    # the variable registry so scalar panels are labeled consistently.
+    if not ax.get_ylabel():
+        ylabel = axis_label(info, resolved)
+        if ylabel:
+            ax.set_ylabel(ylabel)
+    return f, ax

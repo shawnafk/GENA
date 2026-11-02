@@ -854,6 +854,7 @@ class SceneContext:
     orbit_timestamps: np.ndarray
     satellite_orbits: dict[str, np.ndarray]
     space_weather: dict[str, np.ndarray]
+    space_weather_source: str = "none"
     include_field_lines: bool = True
     include_neutral_sheet: bool = True
     include_reference_planes: bool = True
@@ -900,6 +901,7 @@ class SceneContext:
         satellites=('THA', 'ATMS1', 'ATMS2', 'THD', 'THE', 'MMS1'),
         cache_cadence='5min',
         use_space_weather=True,
+        space_weather=None,
         include_field_lines=True,
         include_neutral_sheet=True,
         include_reference_planes=True,
@@ -1012,7 +1014,29 @@ class SceneContext:
                 stacklevel=2,
             )
 
-        if use_space_weather:
+        if space_weather is not None:
+            expected = len(cache_timestamps)
+            provided = {}
+            for name in (
+                'BY_GSM',
+                'BZ_GSM',
+                'Beta',
+                'Mgs_mach_num',
+                'Pressure',
+                'dst',
+            ):
+                values = np.asarray(space_weather.get(name, []), dtype=float)
+                if values.size == 0:
+                    values = np.full(expected, np.nan, dtype=float)
+                elif values.size != expected:
+                    raise ValueError(
+                        f"space_weather[{name!r}] must contain {expected} samples, "
+                        f"got {values.size}"
+                    )
+                provided[name] = values
+            space_weather = provided
+            space_weather_source = "provided"
+        elif use_space_weather:
             raw_weather = load_sw(cache_timestamps, download=False)
             space_weather = {
                 name: np.asarray(raw_weather.get(name, []), dtype=float)
@@ -1025,8 +1049,10 @@ class SceneContext:
                     'dst',
                 )
             }
+            space_weather_source = "load_sw"
         else:
             space_weather = {}
+            space_weather_source = "none"
 
         return cls(
             pose_timestamps=pose_timestamps,
@@ -1036,6 +1062,7 @@ class SceneContext:
             orbit_timestamps=np.asarray(orbit_timestamps, dtype=float),
             satellite_orbits=satellite_orbits,
             space_weather=space_weather,
+            space_weather_source=space_weather_source,
             include_field_lines=include_field_lines,
             include_neutral_sheet=include_neutral_sheet,
             include_reference_planes=include_reference_planes,
@@ -1270,6 +1297,7 @@ def make_scene(
     context=None,
     satellites=('THA', 'ATMS1', 'ATMS2', 'THD', 'THE', 'MMS1'),
     use_space_weather=True,
+    space_weather=None,
     include_field_lines=True,
     include_neutral_sheet=True,
     include_reference_planes=True,
@@ -1300,6 +1328,7 @@ def make_scene(
             [start, stop],
             satellites=satellites,
             use_space_weather=use_space_weather,
+            space_weather=space_weather,
             include_field_lines=include_field_lines,
             include_neutral_sheet=include_neutral_sheet,
             include_reference_planes=include_reference_planes,
@@ -1332,6 +1361,7 @@ def _output_one_day(
     satellite_marker_size,
     update_ephemeris,
     include_plotlyjs,
+    plotlyjs_url,
     overwrite,
 ):
     destination = Path(output_dir) / day / '3d.html'
@@ -1355,19 +1385,14 @@ def _output_one_day(
         update_ephemeris=update_ephemeris,
     )
     figure = context.make_timerange(max_frames=max_frames)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = destination.with_name('.3d.html.tmp')
-    try:
-        figure.write_html(
-            temporary,
-            include_plotlyjs=include_plotlyjs,
-            full_html=True,
-            auto_play=False,
-        )
-        temporary.replace(destination)
-    finally:
-        temporary.unlink(missing_ok=True)
-    return destination
+    from plots.scene import write_html as write_scene_html
+
+    return write_scene_html(
+        figure,
+        destination,
+        include_plotlyjs=include_plotlyjs,
+        plotlyjs_url=plotlyjs_url,
+    )
 
 
 def dumpGeo(
@@ -1389,6 +1414,7 @@ def dumpGeo(
     satellite_marker_size=6,
     update_ephemeris=False,
     include_plotlyjs=True,
+    plotlyjs_url="/static/vendor/plotly.min.js",
     overwrite=True,
     workers=1,
     verbose=False,
@@ -1443,6 +1469,7 @@ def dumpGeo(
         'satellite_marker_size': satellite_marker_size,
         'update_ephemeris': update_ephemeris,
         'include_plotlyjs': include_plotlyjs,
+        'plotlyjs_url': plotlyjs_url,
         'overwrite': overwrite,
     }
     generated = {}

@@ -169,3 +169,17 @@ def f_maxwellian(vx, vy, vz, Ux, Uy, Uz, Ti_eV):
     coeff = 1.0 / (v_th * np.sqrt(np.pi)) ** 3
     exponent = -((vx - Ux) ** 2 + (vy - Uy) ** 2 + (vz - Uz) ** 2) / v_th ** 2
     return coeff * np.exp(exponent)
+
+
+def alfven_mach(B_nT, n_cm3, v_km_s):
+    """Alfvén Mach number for B [nT], n [cm^-3] and v [km/s]."""
+    return np.asarray(v_km_s) * 1000.0 / alfven_velocity(
+        np.asarray(B_nT) * 1e-5,
+        n_cm3,
+        1,
+    )
+
+
+def plasma_beta(B_nT, n_cm3, T_eV):
+    """Plasma beta for B [nT], n [cm^-3] and T [eV]."""
+    return beta(n_cm3, T_eV, np.asarray(B_nT) * 1e-5)

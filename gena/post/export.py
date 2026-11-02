@@ -14,12 +14,13 @@ import pandas as pd
 from common.config import resolve_output_path
 from common.frame import concat
 from common.time import Time
-from plots.vis import savefig
+from plots.tools import savefig
 from plots import ani as gena_ani
 from gena import utils as gut
 from plots import v3d as gena_v3d
-from plots.basic import gena as gena_vis
-from plots.advance import env
+from plots import gena as gena_vis
+from plots.joint import env
+from plots.scene import write_html as write_scene_html
 from gena.frame import ParameterDataFrame
 from load import load
 
@@ -611,6 +612,7 @@ def _save_geometry(period, *, output_path, geometry_options):
     options = dict(geometry_options)
     max_frames = options.pop("max_frames", 48)
     include_plotlyjs = options.pop("include_plotlyjs", True)
+    plotlyjs_url = options.pop("plotlyjs_url", "/static/vendor/plotly.min.js")
     overwrite = options.pop("overwrite", True)
     output_path = Path(output_path)
     if output_path.exists() and not overwrite:
@@ -620,19 +622,12 @@ def _save_geometry(period, *, output_path, geometry_options):
         **options,
     )
     figure = context.make_timerange(max_frames=max_frames)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = output_path.with_name(f".{output_path.name}.tmp")
-    try:
-        figure.write_html(
-            temporary,
-            include_plotlyjs=include_plotlyjs,
-            full_html=True,
-            auto_play=False,
-        )
-        temporary.replace(output_path)
-    finally:
-        temporary.unlink(missing_ok=True)
-    return output_path
+    return write_scene_html(
+        figure,
+        output_path,
+        include_plotlyjs=include_plotlyjs,
+        plotlyjs_url=plotlyjs_url,
+    )
 
 
 def report(

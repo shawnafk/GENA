@@ -1,7 +1,58 @@
-from geopack import geopack
+"""Magnetospheric boundary and T96 field models.
+
+``geopack`` is imported lazily. Its module-level initialisation tries to
+download the IGRF coefficient list; that would make importing a plotting or
+report module perform network I/O. T96 users can opt in to the update with
+``GEOPACK_ALLOW_NETWORK=1``; the default uses the coefficient file already
+installed with geopack and fails fast if it is unavailable.
+"""
+
+from __future__ import annotations
+
+import os
+
 import numpy as np
 import pandas as pd
 from scipy import optimize
+
+
+class _LazyGeopack:
+    """Proxy that imports geopack only on first T96 access."""
+
+    _module = None
+
+    @classmethod
+    def _load(cls):
+        if cls._module is not None:
+            return cls._module
+
+        if os.environ.get("GEOPACK_ALLOW_NETWORK", "0") == "1":
+            from geopack import geopack as module
+        else:
+            # geopack's init_igrf() always calls update_igrf() first. Disable
+            # that one network call; it then reads the local igrf*coeffs.txt.
+            import urllib.request
+
+            original = urllib.request.urlopen
+
+            def _offline(*args, **kwargs):
+                raise OSError("geopack IGRF update disabled; set GEOPACK_ALLOW_NETWORK=1")
+
+            urllib.request.urlopen = _offline
+            try:
+                from geopack import geopack as module
+            finally:
+                urllib.request.urlopen = original
+
+        cls._module = module
+        return module
+
+    def __getattr__(self, name):
+        return getattr(self._load(), name)
+
+
+geopack = _LazyGeopack()
+
 #get key variables from omni at given time
 #MP, solar wind dynamic pressure and IMP_Bz
 #T96 field lines: solar wind dynamic pressure, dst index, IMF_By and IMF_Bz
