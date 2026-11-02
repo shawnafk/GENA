@@ -215,9 +215,10 @@ def _convert_events(raw_file, config, engineering, writer, progress=None):
                 counts[f'l2_{probe}'] += len(l2)
             soft, gold = _quality_masks(l1a, l2, params, probe)
             if 'l2s' in config.products:
-                # L2S does not require X/Y TOF agreement; use min(Tof_X, Tof_Y)
-                # so soft-selected events still get a usable Tof/Spec/Energy.
-                l2s = conv.l2s_with_xy_tof(l2.loc[soft])
+                # l2.loc[soft] is already the selected subset. Mutate that small
+                # frame in place; never copy the full L2 table here.
+                l2s = l2.loc[soft]
+                l2s = conv.l2s_with_xy_tof(l2s)
                 writer.write(l2s, f'l2s_{probe}')
                 counts[f'l2s_{probe}'] += len(l2s)
             if 'l2g' in config.products:

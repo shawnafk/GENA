@@ -335,23 +335,21 @@ def l1a_2_l2(l1a, params, prob='a'):
     return df2
 
 
-def l2s_with_xy_tof(l2):
-    """Return L2S rows with Tof from the smaller X/Y axis TOF.
+def l2s_with_xy_tof(l2s):
+    """Recompute L2S Tof/Spec/Energy on the already soft-selected rows.
 
-    L2S deliberately does not require X/Y TOF agreement. The regular L2
-    ``Tof`` may therefore be NaN even when the event passes the soft timing
-    checks. For L2S, use min(Tof_X, Tof_Y) as the flight-time estimate (still
-    adding the electron flight correction), then recompute Spec and Energy
-    from that estimate. L2 and L2G are not changed by this function.
+    ``l2s`` must be the small ``l2.loc[soft]`` subset, not the full L2 table.
+    It is modified in place; no full-table copy is made. L2S deliberately does
+    not require X/Y TOF agreement, so use min(Tof_X, Tof_Y), add the electron
+    flight correction, and derive Spec/Energy from that estimate.
     """
-    out = l2.copy()
-    if len(out) == 0:
-        return out
+    if len(l2s) == 0:
+        return l2s
     tof_xy = np.minimum(
-        out['Tof_X'].to_numpy(dtype=np.float64),
-        out['Tof_Y'].to_numpy(dtype=np.float64),
+        l2s['Tof_X'].to_numpy(dtype=np.float64),
+        l2s['Tof_Y'].to_numpy(dtype=np.float64),
     )
-    out['Tof'] = (tof_xy + f_tof_ep(out)).astype(np.float32)
-    out['Spec'] = ENA_spec(out)
-    out['Energy'] = ENA_energy(out)
-    return out
+    l2s['Tof'] = (tof_xy + f_tof_ep(l2s)).astype(np.float32)
+    l2s['Spec'] = ENA_spec(l2s)
+    l2s['Energy'] = ENA_energy(l2s)
+    return l2s
