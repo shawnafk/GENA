@@ -333,3 +333,25 @@ def l1a_2_l2(l1a, params, prob='a'):
     df2['PY'] = (np.arctan2(y1-y2,50)*180/np.pi).astype('float32')
 
     return df2
+
+
+def l2s_with_xy_tof(l2):
+    """Return L2S rows with Tof from the smaller X/Y axis TOF.
+
+    L2S deliberately does not require X/Y TOF agreement. The regular L2
+    ``Tof`` may therefore be NaN even when the event passes the soft timing
+    checks. For L2S, use min(Tof_X, Tof_Y) as the flight-time estimate (still
+    adding the electron flight correction), then recompute Spec and Energy
+    from that estimate. L2 and L2G are not changed by this function.
+    """
+    out = l2.copy()
+    if len(out) == 0:
+        return out
+    tof_xy = np.minimum(
+        out['Tof_X'].to_numpy(dtype=np.float64),
+        out['Tof_Y'].to_numpy(dtype=np.float64),
+    )
+    out['Tof'] = (tof_xy + f_tof_ep(out)).astype(np.float32)
+    out['Spec'] = ENA_spec(out)
+    out['Energy'] = ENA_energy(out)
+    return out

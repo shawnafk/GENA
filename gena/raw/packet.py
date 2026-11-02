@@ -543,6 +543,9 @@ def packet_uuids(p):
     the same identity even if it is received in another file; event identity
     is the pair (UUID, PID). Source file and byte-offset provenance should be
     retained separately by the caller.
+
+    UUID 是对 packet 的完整字节码生成的；同一个 packet 的所有事件共享该 UUID，
+    事件之间通过 PID 区分。
     """
     return [str(uuid.uuid5(_PACKET_NAMESPACE, hashlib.sha256(row.tobytes()).hexdigest()))
             for row in _wire_packets(p)]
@@ -559,6 +562,7 @@ def packets_2_df0(p):
     num_packets = len(p)
     total_rows = num_packets * 62
     uuids = packet_uuids(p)
+    # 同一个 packet 的 62 个事件共享此 UUID；用 PID 区分事件。
     df0['UUID'] = np.repeat(uuids, 62)
     
     df0['PID'] = np.tile(np.arange(1, 63, dtype=np.uint8), num_packets)
