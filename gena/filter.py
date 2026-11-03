@@ -483,9 +483,11 @@ def level2_loose(l1a, params, prob='a', dir='all'):
 
 def level2_soft(l1a, params, prob='a', dir='all'):
     """Tier 2: length, relative order, start sum and start/end differences."""
-    return np.asarray(
-        time_structure_eff(l1a, dir=dir, params=params, prob=prob),
-        dtype=bool,
+    return (
+        np.asarray(length_eff(l1a, dir=dir, params=params, prob=prob), dtype=bool)
+        & np.asarray(rel_eff(l1a, dir=dir, params=params, prob=prob), dtype=bool)
+        & np.asarray(sum_eff(l1a, dir=dir, params=params, prob=prob), dtype=bool)
+        & np.asarray(diff_eff(l1a, dir=dir, params=params, prob=prob), dtype=bool)
     )
 
 
@@ -499,26 +501,6 @@ def level2_tight(l1a, l2, params, prob='a',
             onboard_eff(l2, c_size=c_size, m_size=m_size),
             dtype=bool,
         )
-    )
-
-
-@filter_rule
-def time_structure_eff(df, dir='all', params=init_param(1), prob='a'):
-    """Base mask used by level2_soft: all five timing-structure checks."""
-    return (
-        length_eff(df, dir=dir, params=params, prob=prob)
-        & rel_eff(df, dir=dir, params=params, prob=prob)
-        & sum_eff(df, dir=dir, params=params, prob=prob)
-        & diff_eff(df, dir=dir, params=params, prob=prob)
-    )
-
-
-@filter_rule
-def time_tof_eff(df, dir='all', params=init_param(1), prob='a'):
-    """time_structure_eff plus X/Y TOF consistency (no aperture check)."""
-    return (
-        np.asarray(time_structure_eff(df, dir=dir, params=params, prob=prob), dtype=bool)
-        & np.asarray(tofxy_eff(df), dtype=bool)
     )
 
 

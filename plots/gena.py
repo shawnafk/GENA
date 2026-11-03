@@ -361,7 +361,7 @@ def filter(l1, f=None, ax=None, **kwargs):
     ns_within = ss & ns_check
 
     # Golden standard — all checks pass (replaces old match_eff)
-    golden = flt.time_tof_eff(dir='all')(l1)
+    golden = flt.level2_soft(l1, params=init_param(1)) & np.asarray(flt.tofxy_eff(l1), dtype=bool)
     golden_match = ss & golden
 
     _add_value_labels(ax, [xlabel[0]], [len(l1)])
