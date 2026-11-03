@@ -184,29 +184,6 @@ def ENA_spec(df):
     spec[between_SH_FO & (ep > 1580)] = 2    # O (high amplitude)
     return spec
 
-#zhengjiangshan: when consider lu's method, this function may also be modified
-def ENA_flytime(df):
-    """Select a supported positive, finite flight time in ns.
-
-    Prefer the main TOF when both axes agree with it within 5 ns. Otherwise
-    use the smaller axis TOF only when X/Y agree within 5 ns or their ratio
-    lies strictly between 0.9 and 1.1. Unsupported estimates remain NaN;
-    this function does not drop event rows or repair recorded channels.
-    """
-    tof_m = np.asarray(df['Tof_M'], dtype=np.float64)
-    tof_x = np.asarray(df['Tof_X'], dtype=np.float64)
-    tof_y = np.asarray(df['Tof_Y'], dtype=np.float64)
-    valid_m = np.isfinite(tof_m) & (tof_m > 0)
-    valid_xy = np.isfinite(tof_x) & (tof_x > 0) & np.isfinite(tof_y) & (tof_y > 0)
-    with np.errstate(invalid='ignore', divide='ignore'):
-        main = valid_m & valid_xy & (np.abs(tof_m - tof_x) < 5) & (np.abs(tof_m - tof_y) < 5)
-        ratio = tof_x / tof_y
-        consistent_xy = (np.abs(tof_x - tof_y) < 5) | ((ratio > 0.9) & (ratio < 1.1))
-    axes = ~main & valid_xy & consistent_xy
-    tof = np.full(len(df), np.nan, dtype=np.float32)
-    tof[main] = tof_m[main]
-    tof[axes] = np.minimum(tof_x[axes], tof_y[axes])
-    return tof
 
 #EV
 def ENA_energy(df):
@@ -292,6 +269,21 @@ def l1_2_l1a(df1, engineering):
     return df1a_out
 
 
+def combine_xy_tof(df):
+    """Combine X/Y flight times for the final Tof column.
+
+    If X/Y satisfy the same relative agreement test used by tofxy_eff, use
+    their mean; otherwise use min(Tof_X, Tof_Y). The electron flight
+    correction is added in both branches. Tof_M is left as the recorded main
+    TOF and is not overwritten.
+    """
+    tof_x = np.asarray(df['Tof_X'], dtype=np.float64)
+    tof_y = np.asarray(df['Tof_Y'], dtype=np.float64)
+    close = np.asarray(flt.tofxy_ratio_ok(tof_x, tof_y), dtype=bool)
+    tof_xy = np.where(close, (tof_x + tof_y) / 2.0, np.minimum(tof_x, tof_y))
+    return (tof_xy + f_tof_ep(df)).astype(np.float32)
+
+
 # L1A -> L2
 def l1a_2_l2(l1a, params, prob='a'):
     """Convert L1A event rows without selection or channel repair.
@@ -311,12 +303,13 @@ def l1a_2_l2(l1a, params, prob='a'):
         if k in l1a.columns:
             df2[k] = l1a[k]
 
-    tof_ep = f_tof_ep(df2)
     df2['Tof_X']  = tof_x
     df2['Tof_Y']  = tof_y
     df2['Tof_M'] = tof_m
 
-    df2['Tof'] = ENA_flytime(df2) + tof_ep
+    # Final TOF: average if X/Y agree by the same relative test as tofxy_eff;
+    # otherwise use the smaller axis estimate. Add electron flight correction.
+    df2['Tof'] = combine_xy_tof(df2)
     df2['Spec'] = ENA_spec(df2)
     
     x1,y1 = params['ns_2_xy'](l1a,0,prob=prob)
@@ -333,23 +326,3 @@ def l1a_2_l2(l1a, params, prob='a'):
     df2['PY'] = (np.arctan2(y1-y2,50)*180/np.pi).astype('float32')
 
     return df2
-
-
-def l2s_with_xy_tof(l2s):
-    """Recompute L2S Tof/Spec/Energy on the already soft-selected rows.
-
-    ``l2s`` must be the small ``l2.loc[soft]`` subset, not the full L2 table.
-    It is modified in place; no full-table copy is made. L2S deliberately does
-    not require X/Y TOF agreement, so use min(Tof_X, Tof_Y), add the electron
-    flight correction, and derive Spec/Energy from that estimate.
-    """
-    if len(l2s) == 0:
-        return l2s
-    tof_xy = np.minimum(
-        l2s['Tof_X'].to_numpy(dtype=np.float64),
-        l2s['Tof_Y'].to_numpy(dtype=np.float64),
-    )
-    l2s['Tof'] = (tof_xy + f_tof_ep(l2s)).astype(np.float32)
-    l2s['Spec'] = ENA_spec(l2s)
-    l2s['Energy'] = ENA_energy(l2s)
-    return l2s

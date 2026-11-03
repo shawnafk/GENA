@@ -440,7 +440,7 @@ def _repair_method_1(df1a, params, prob):
 
     df1b['Type'] = np.uint8(255)
     df1b['Process_Mask'] = np.uint32(0)
-    df1b.loc[flt.level2_soft(df1b, params=params, prob=prob) & np.asarray(flt.tofxy_eff(df1b), dtype=bool),'Type'] = np.uint8(0)
+    df1b.loc[flt.L_high(df1b, params=params, prob=prob) & np.asarray(flt.tofxy_eff(df1b), dtype=bool),'Type'] = np.uint8(0)
 
     quality_cols = ['Xs_valid', 'Ys_valid', 'Xe_valid', 'Ye_valid', 'start_valid','end_valid']
     for k in quality_cols:
@@ -490,7 +490,7 @@ def _repair_method_2(df1a, params, prob):
 
     df1b['Type'] = np.uint8(255)
     df1b['Process_Mask'] = np.uint32(0)
-    df1b.loc[flt.level2_soft(df1b, params=params, prob=prob) & np.asarray(flt.tofxy_eff(df1b), dtype=bool),'Type'] = np.uint8(0)
+    df1b.loc[flt.L_high(df1b, params=params, prob=prob) & np.asarray(flt.tofxy_eff(df1b), dtype=bool),'Type'] = np.uint8(0)
 
     quality_cols = ['Xs_valid', 'Ys_valid', 'Xe_valid', 'Ye_valid', 'start_valid','end_valid']
     for k in quality_cols:

@@ -32,7 +32,7 @@ def main(argv=None):
     parser.add_argument('--snid', type=int, choices=(1, 2), default=1)
     parser.add_argument('--chunk-packets', type=int, default=RawConfig.chunk_packets)
     parser.add_argument('--products', default=','.join(sorted(RawConfig().products)),
-                        help='comma-separated: pdf,l1,l1a,l2,l2s,l2g')
+                        help='comma-separated: pdf,l1,l1a,l2,l2l,l2m,l2h,l2f')
     parser.add_argument('--no-day-split', action='store_true')
     parser.add_argument('--no-overwrite', action='store_true')
     parser.add_argument('--force', action='store_true')

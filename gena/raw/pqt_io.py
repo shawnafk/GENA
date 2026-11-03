@@ -26,10 +26,14 @@ SUPPORTED_SUFFIX = {
     "l1a_b": st.df1a_type,
     "l2_a": st.df2_type,
     "l2_b": st.df2_type,
-    "l2s_a": st.df2_type,
-    "l2s_b": st.df2_type,
-    "l2g_a": st.df2_type,
-    "l2g_b": st.df2_type,
+    "l2l_a": st.df2_type,
+    "l2l_b": st.df2_type,
+    "l2m_a": st.df2_type,
+    "l2m_b": st.df2_type,
+    "l2h_a": st.df2_type,
+    "l2h_b": st.df2_type,
+    "l2f_a": st.df2_type,
+    "l2f_b": st.df2_type,
 }
 
 

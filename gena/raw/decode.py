@@ -42,13 +42,13 @@ ENGINEERING_COLUMNS = [
     'MJ2000_Star_X', 'MJ2000_Star_Y', 'MJ2000_Star_Z',
     'PosePresent',
 ]
-EVENT_PRODUCTS = frozenset({"l1", "l1a", "l2", "l2s", "l2g"})
+EVENT_PRODUCTS = frozenset({"l1", "l1a", "l2", "l2l", "l2m", "l2h", "l2f"})
 ALL_PRODUCTS = frozenset({"pdf"}) | EVENT_PRODUCTS
 
-# L2G selection: apply the physical 90 x 30 mm carbon/start aperture. The end
-# plane keeps the existing 150 x 60 mm engineering window.
-L2G_START_APERTURE_MM = (90, 30)
-L2G_END_WINDOW_MM = (150, 60)
+# L2F selection: physical 90 x 30 mm carbon/start aperture and the end-plane
+# 150 x 60 mm engineering window.
+L2F_START_APERTURE_MM = (90, 30)
+L2F_END_WINDOW_MM = (150, 60)
 
 
 @dataclass(frozen=True)
@@ -60,7 +60,7 @@ class RawConfig:
     by_day: bool = True
     overwrite: bool = True
     force: bool = False
-    products: frozenset[str] = frozenset({"pdf", "l1a", "l2", "l2s", "l2g"})
+    products: frozenset[str] = frozenset({"pdf", "l1a", "l2l", "l2m", "l2h", "l2f"})
     progress: bool = True
 
     def validate(self):
@@ -148,14 +148,21 @@ def _scan_engineering(raw_file, config, writer, progress=None):
     return engineering, packet_count, duplicate_packets, int(stats.get('truncated_bytes', 0))
 
 
-def _quality_masks(l1a, l2, params, probe):
-    soft = flt.level2_soft(l1a, params=params, prob=probe)
-    gold = flt.level2_tight(
-        l1a, l2, params=params, prob=probe,
-        c_size=L2G_START_APERTURE_MM,
-        m_size=L2G_END_WINDOW_MM,
+def _level2_masks(l1a, l2, params, probe):
+    """Return L_light, L_medium, L_high and final L2 masks."""
+    light = np.asarray(flt.L_light(l1a, params=params, prob=probe), dtype=bool)
+    medium = np.asarray(flt.L_medium(l1a, params=params, prob=probe), dtype=bool)
+    high = np.asarray(flt.L_high(l1a, params=params, prob=probe), dtype=bool)
+    final = high & np.asarray(flt.tofxy_eff(l1a), dtype=bool)
+    final &= np.asarray(
+        flt.onboard_eff(
+            l2,
+            c_size=L2F_START_APERTURE_MM,
+            m_size=L2F_END_WINDOW_MM,
+        ),
+        dtype=bool,
     )
-    return np.asarray(soft, dtype=bool), np.asarray(gold, dtype=bool)
+    return light, medium, high, final
 
 
 def _convert_events(raw_file, config, engineering, writer, progress=None):
@@ -166,8 +173,9 @@ def _convert_events(raw_file, config, engineering, writer, progress=None):
     packet_count = 0
     duplicate_packets = 0
     want_l1 = 'l1' in config.products
-    want_l1a = 'l1a' in config.products or bool(config.products & {'l2', 'l2s', 'l2g'})
-    want_l2 = bool(config.products & {'l2', 'l2s', 'l2g'})
+    l2_products = {'l2', 'l2l', 'l2m', 'l2h', 'l2f'}
+    want_l1a = 'l1a' in config.products or bool(config.products & l2_products)
+    want_l2 = bool(config.products & l2_products)
 
     for packet, ids, duplicates in _iter_unique_packets(raw_file, config, seen, progress):
         packet_count += len(ids)
@@ -206,17 +214,15 @@ def _convert_events(raw_file, config, engineering, writer, progress=None):
             if 'l2' in config.products:
                 writer.write(l2, f'l2_{probe}')
                 counts[f'l2_{probe}'] += len(l2)
-            soft, gold = _quality_masks(l1a, l2, params, probe)
-            if 'l2s' in config.products:
-                # l2.loc[soft] is already the selected subset. Mutate that small
-                # frame in place; never copy the full L2 table here.
-                l2s = l2.loc[soft]
-                l2s = conv.l2s_with_xy_tof(l2s)
-                writer.write(l2s, f'l2s_{probe}')
-                counts[f'l2s_{probe}'] += len(l2s)
-            if 'l2g' in config.products:
-                writer.write(l2.loc[gold], f'l2g_{probe}')
-                counts[f'l2g_{probe}'] += int(np.count_nonzero(gold))
+            light, medium, high, final = _level2_masks(
+                l1a, l2, params, probe)
+            for name, mask in (
+                ('l2l', light), ('l2m', medium),
+                ('l2h', high), ('l2f', final),
+            ):
+                if name in config.products:
+                    writer.write(l2.loc[mask], f'{name}_{probe}')
+                    counts[f'{name}_{probe}'] += int(np.count_nonzero(mask))
     return packet_count, duplicate_packets, counts
 
 
@@ -304,7 +310,7 @@ def main(argv=None):
     parser.add_argument('--snid', type=int, choices=(1, 2), default=1)
     parser.add_argument('--chunk-packets', type=int, default=4096)
     parser.add_argument('--products', default=','.join(sorted(RawConfig().products)),
-                        help='comma-separated: pdf,l1,l1a,l2,l2s,l2g')
+                        help='comma-separated: pdf,l1,l1a,l2,l2l,l2m,l2h,l2f')
     parser.add_argument('--no-day-split', action='store_true')
     parser.add_argument('--no-overwrite', action='store_true')
     parser.add_argument('--force', action='store_true')

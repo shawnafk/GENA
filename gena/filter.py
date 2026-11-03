@@ -376,15 +376,22 @@ def block_eff(df, d, angle_uncert_deg=2.5):
 
     return eff_x & eff_y
 
+def tofxy_ratio_ok(tofx, tofy, p_low=0.937, p_high=1.117):
+    """Relative X/Y TOF agreement, shared by L2 and tofxy_eff."""
+    tofx = np.asarray(tofx, dtype=np.float64)
+    tofy = np.asarray(tofy, dtype=np.float64)
+    with np.errstate(invalid='ignore', divide='ignore'):
+        r = tofx / tofy
+    return (r > p_low) & (r < p_high) & (tofx > 0) & (tofy > 0)
+
+
 @filter_rule
 def tofxy_eff(df, p_low=0.937, p_high=1.117):
     #print("check tofx ~ tofy")
     """TOF consistency between X and Y measurements."""
     tofx = ((df['TX_1e'] + df['TX_2e']) - (df['TX_1s'] + df['TX_2s'])) / 2
     tofy = ((df['TY_1e'] + df['TY_2e']) - (df['TY_1s'] + df['TY_2s'])) / 2
-    r = tofx / tofy
-    #!there are end less than starts
-    return (r > p_low) & (r < p_high) & (tofx > 0) & (tofy > 0)
+    return tofxy_ratio_ok(tofx, tofy, p_low=p_low, p_high=p_high)
 
 @filter_rule
 def energy_eff(df, Emin, Emax):
@@ -466,43 +473,47 @@ def diff_eff(df, dir='all', channel='all', params=init_param(1), prob='a',
 
 
 # ---------------------------------------------------------------------------
-# Level-2 tiers: loose -> soft -> tight
+# Level-2 L1A tiers: light -> medium -> high
 # ---------------------------------------------------------------------------
-# The masks are monotonic: loose is the largest set, tight the smallest.
-# Loose checks only start/end ordering; soft adds length, sum and difference;
-# tight adds X/Y TOF agreement and the detector aperture. Energy and pose
-# validity are deliberately not part of these three masks.
+# The masks are monotonic: light is the largest set, high the smallest.
+# These three tiers only use L1A TDC structure. They deliberately do not
+# compare Tof_X/Tof_Y and do not apply the detector aperture; those checks
+# belong to the later L2 selection.
 
-def level2_loose(l1a, params, prob='a', dir='all'):
-    """Tier 1: only require each start channel to precede its end channel."""
-    return np.asarray(
-        rel_eff(l1a, dir=dir, params=params, prob=prob),
-        dtype=bool,
+def L_light(l1a, params, prob='a', dir='all'):
+    """Tier 1: start/end order and start/end difference bounds only.
+
+    Does not require the length or start-sum checks.
+    """
+    return (
+        np.asarray(rel_eff(l1a, dir=dir, params=params, prob=prob))
+        & np.asarray(diff_eff(l1a, dir=dir, params=params, prob=prob), dtype=bool)
     )
 
 
-def level2_soft(l1a, params, prob='a', dir='all'):
-    """Tier 2: length, relative order, start sum and start/end differences."""
+def L_medium(l1a, params, prob='a', dir='all'):
+    """Tier 2: add the start-length bound to L_light.
+
+    Does not require the start-sum check.
+    """
+    return (
+        np.asarray(length_eff(l1a, dir=dir, params=params, prob=prob), dtype=bool)
+        & np.asarray(rel_eff(l1a, dir=dir, params=params, prob=prob), dtype=bool)
+        & np.asarray(diff_eff(l1a, dir=dir, params=params, prob=prob), dtype=bool)
+    )
+
+def L_high(l1a, params, prob='a', dir='all'):
+    """Tier 3: length, relative order, start sum and start/end differences.
+
+    This is the complete L1A timing-structure mask. It does not compare
+    Tof_X/Tof_Y and does not apply the detector aperture.
+    """
     return (
         np.asarray(length_eff(l1a, dir=dir, params=params, prob=prob), dtype=bool)
         & np.asarray(rel_eff(l1a, dir=dir, params=params, prob=prob), dtype=bool)
         & np.asarray(sum_eff(l1a, dir=dir, params=params, prob=prob), dtype=bool)
         & np.asarray(diff_eff(l1a, dir=dir, params=params, prob=prob), dtype=bool)
     )
-
-
-def level2_tight(l1a, l2, params, prob='a',
-                 c_size=(90, 30), m_size=(150, 60)):
-    """Tier 3: soft checks plus X/Y TOF agreement and detector aperture."""
-    return (
-        level2_soft(l1a, params=params, prob=prob)
-        & np.asarray(tofxy_eff(l1a), dtype=bool)
-        & np.asarray(
-            onboard_eff(l2, c_size=c_size, m_size=m_size),
-            dtype=bool,
-        )
-    )
-
 
 # ---------------------------------------------------------------------------
 # Diagnose & Classify

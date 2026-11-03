@@ -165,7 +165,7 @@ def build_observation_summary(
     large_gap="1h",
     small_gap="5min",
     coord="GSM",
-    ena_product="l2g",
+    ena_product="l2f",
 ):
     """Build one row per continuous GENA observation segment.
 
@@ -338,7 +338,7 @@ def observation_summary(
     large_gap="1h",
     small_gap="5min",
     coord="GSM",
-    ena_product="l2g",
+    ena_product="l2f",
 ):
     """Generate ``observation_summary.xlsx`` using :func:`report` time rules.
 
@@ -419,9 +419,10 @@ def load_products(period, prob):
     product_names = {
         "pdf": "pdf",
         "l1a": f"l1a_{prob}",
-        "l2": f"l2_{prob}",
-        "l2s": f"l2s_{prob}",
-        "l2g": f"l2g_{prob}",
+        "l2l": f"l2l_{prob}",
+        "l2m": f"l2m_{prob}",
+        "l2h": f"l2h_{prob}",
+        "l2f": f"l2f_{prob}",
     }
     return {
         name: load("gena", trange=interval, product=product)
@@ -466,11 +467,12 @@ def batch_plot(
     labels = [
         "Engineering (PDF)",
         "L1A events",
-        "L2 events",
-        "L2 soft events",
-        "L2 golden events",
+        "L2 light events",
+        "L2 medium events",
+        "L2 high events",
+        "L2 final events",
     ]
-    keys = ["pdf", "l1a", "l2", "l2s", "l2g"]
+    keys = ["pdf", "l1a", "l2l", "l2m", "l2h", "l2f"]
     rows = []
     for label, key in zip(labels, keys):
         frame = products[key]
@@ -502,10 +504,10 @@ def batch_plot(
     )
     figures["summary"] = fig
 
-    level_keys = ["l1a", "l2", "l2s", "l2g"]
+    level_keys = ["l1a", "l2l", "l2m", "l2h", "l2f"]
     fig, ax = gena_vis.counts(
         [products[key] for key in level_keys],
-        labels=["L1A", "L2", "L2 soft", "L2 golden"],
+        labels=["L1A", "L2 light", "L2 medium", "L2 high", "L2 final"],
         window=window,
         vmax=None,
     )

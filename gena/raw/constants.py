@@ -10,7 +10,7 @@ from gena.constants import init_param
 
 DEFAULT_SNID = 1
 DEFAULT_CHUNK_PACKETS = 4096
-DEFAULT_PRODUCTS = frozenset({"pdf", "l1a", "l2", "l2s", "l2g"})
+DEFAULT_PRODUCTS = frozenset({"pdf", "l1a", "l2l", "l2m", "l2h", "l2f"})
 
 
 if __name__ == '__main__':
