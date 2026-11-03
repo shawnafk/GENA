@@ -13,6 +13,33 @@ Core API:
       -> DataFrame of per-check booleans
   classify(df, params, prob, re_err)
       -> dict of named category masks
+
+filter_rule 装饰器
+-----------------
+@filter_rule 让筛选函数支持两种调用方式，不改变原函数的筛选公式：
+
+1. 传入 df，立即计算并返回布尔 mask：
+
+       mask = energy_eff(df, Emin=4, Emax=100)
+       filtered = df.select(mask)
+
+2. 不传 df，返回 FilterNode，保存参数并推迟到传入数据时计算：
+
+       rule = energy_eff(Emin=4, Emax=100)
+       filtered = df.select(rule)
+
+FilterNode 支持 &（且）、|（或）、~（取反），因此规则可以预先组合并复用：
+
+    rule = energy_eff(Emin=4, Emax=100) & onboard_eff()
+    filtered = df.select(rule)
+
+df.select(rule) 会调用 rule(df) 得到布尔 mask，再按 mask 选取行；规则本身不返回筛选后的表。
+
+去掉 @filter_rule 后，energy_eff(df, Emin=4, Emax=100) 仍正常工作，结果不变；但 energy_eff(Emin=4, Emax=100) 会因缺少 df 参数而报错，无法用这种方式生成和组合延迟规则。仍可传入 df，直接组合计算好的 mask：
+
+    filtered = df.select(
+        energy_eff(df, Emin=4, Emax=100) & onboard_eff(df)
+    )
 """
 
 import numpy as np
@@ -348,6 +375,7 @@ def block_eff(df, d, angle_uncert_deg=2.5):
     eff_y = (y_hit_min <= y_top) & (y_hit_max >= y_bot)
 
     return eff_x & eff_y
+
 @filter_rule
 def tofxy_eff(df, p_low=0.937, p_high=1.117):
     #print("check tofx ~ tofy")
@@ -358,12 +386,10 @@ def tofxy_eff(df, p_low=0.937, p_high=1.117):
     #!there are end less than starts
     return (r > p_low) & (r < p_high) & (tofx > 0) & (tofy > 0)
 
-
 @filter_rule
 def energy_eff(df, Emin, Emax):
     """Energy range filter."""
     return (df['Energy'] > Emin) & (df['Energy'] < Emax)
-
 
 @filter_rule
 def select_circ(df, center=[0, 0], radius=10, layer=1):
@@ -385,26 +411,116 @@ def select_rect(df, center=[0, 0], width=10, height=10, layer=1):
     return ((x > center[0] - w) & (x < center[0] + w)
             & (y > center[1] - h) & (y < center[1] + h))
 
-
-
 # ---------------------------------------------------------------------------
 # Standard filter factories
 # ---------------------------------------------------------------------------
-#check X Y, strictly
-def golden_std(dir='all',params=init_param(1), prob='a', tofxy=True):
-    base = [
-        check('length', params=params, prob=prob, dir=dir, edge='all', channel='s'),
-        check('rel', params=params, prob=prob, dir=dir,edge='all'),
-        check('sum', params=params, prob=prob, dir=dir,channel='s'),
-        check('diff', params=params, prob=prob, dir=dir, channel='s'),
-        check('diff', params=params, prob=prob, dir=dir, channel='e'),
-    ]
-    if tofxy and dir == 'all':
-        base.append(tofxy_eff)
-    return reduce(operator.and_, base)
+# ---------------------------------------------------------------------------
+# Named masks built from check()
+# ---------------------------------------------------------------------------
+# These are small, stable entry points for the dimension-expanding check()
+# factory. Each accepts a DataFrame and returns a plain boolean mask; calling
+# one without df is still possible through @filter_rule.
 
-def soft_std(dir='all',params=init_param(1), prob='a'):
-    return golden_std(dir=dir, params=params, prob=prob, tofxy=False)
+
+@filter_rule
+def length_eff(df, dir='all', edge='all', params=init_param(1), prob='a',
+               re_err=TOL):
+    """Start-channel length bound for X/Y and one or both edges."""
+    return np.asarray(
+        check('length', dir=dir, edge=edge, channel='s',
+              params=params, prob=prob, re_err=re_err)(df),
+        dtype=bool,
+    )
+
+
+@filter_rule
+def rel_eff(df, dir='all', edge='all', params=init_param(1), prob='a',
+            re_err=TOL):
+    """Require each start channel to be earlier than its end channel."""
+    return np.asarray(
+        check('rel', dir=dir, edge=edge,
+              params=params, prob=prob, re_err=re_err)(df),
+        dtype=bool,
+    )
+
+
+@filter_rule
+def sum_eff(df, dir='all', params=init_param(1), prob='a', re_err=TOL_SUM):
+    """Require the two start channels in each direction to sum correctly."""
+    return np.asarray(
+        check('sum', dir=dir, channel='s',
+              params=params, prob=prob, re_err=re_err)(df),
+        dtype=bool,
+    )
+
+
+@filter_rule
+def diff_eff(df, dir='all', channel='all', params=init_param(1), prob='a',
+             re_err=TOL_DIFF):
+    """Joint X/Y difference bound; default checks both start and end."""
+    return np.asarray(
+        check('diff', dir=dir, channel=channel,
+              params=params, prob=prob, re_err=re_err)(df),
+        dtype=bool,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Level-2 tiers: loose -> soft -> tight
+# ---------------------------------------------------------------------------
+# The masks are monotonic: loose is the largest set, tight the smallest.
+# Loose checks only start/end ordering; soft adds length, sum and difference;
+# tight adds X/Y TOF agreement and the detector aperture. Energy and pose
+# validity are deliberately not part of these three masks.
+
+def level2_loose(l1a, params, prob='a', dir='all'):
+    """Tier 1: only require each start channel to precede its end channel."""
+    return np.asarray(
+        rel_eff(l1a, dir=dir, params=params, prob=prob),
+        dtype=bool,
+    )
+
+
+def level2_soft(l1a, params, prob='a', dir='all'):
+    """Tier 2: length, relative order, start sum and start/end differences."""
+    return np.asarray(
+        time_structure_eff(l1a, dir=dir, params=params, prob=prob),
+        dtype=bool,
+    )
+
+
+def level2_tight(l1a, l2, params, prob='a',
+                 c_size=(90, 30), m_size=(150, 60)):
+    """Tier 3: soft checks plus X/Y TOF agreement and detector aperture."""
+    return (
+        level2_soft(l1a, params=params, prob=prob)
+        & np.asarray(tofxy_eff(l1a), dtype=bool)
+        & np.asarray(
+            onboard_eff(l2, c_size=c_size, m_size=m_size),
+            dtype=bool,
+        )
+    )
+
+
+@filter_rule
+def time_structure_eff(df, dir='all', params=init_param(1), prob='a'):
+    """Base mask used by level2_soft: all five timing-structure checks."""
+    return (
+        length_eff(df, dir=dir, params=params, prob=prob)
+        & rel_eff(df, dir=dir, params=params, prob=prob)
+        & sum_eff(df, dir=dir, params=params, prob=prob)
+        & diff_eff(df, dir=dir, params=params, prob=prob)
+    )
+
+
+@filter_rule
+def time_tof_eff(df, dir='all', params=init_param(1), prob='a'):
+    """time_structure_eff plus X/Y TOF consistency (no aperture check)."""
+    return (
+        np.asarray(time_structure_eff(df, dir=dir, params=params, prob=prob), dtype=bool)
+        & np.asarray(tofxy_eff(df), dtype=bool)
+    )
+
 
 # ---------------------------------------------------------------------------
 # Diagnose & Classify
@@ -414,19 +530,21 @@ _DIAG_COLUMNS = [
     # X direction
     ('X_len_1s', 'length', {'dir': 'X', 'edge': '1', 'channel': 's'}),
     ('X_len_2s', 'length', {'dir': 'X', 'edge': '2', 'channel': 's'}),
-    ('X_sum',    'sum',    {'dir': 'X'}),
+    ('X_sum',    'sum',    {'dir': 'X', 'channel': 's'}),
+    ('X_rel',    'rel',    {'dir': 'X'}),
     ('X_diff_s', 'diff',   {'dir': 'X', 'channel': 's'}),
     ('X_diff_e', 'diff',   {'dir': 'X', 'channel': 'e'}),
     # Y direction
     ('Y_len_1s', 'length', {'dir': 'Y', 'edge': '1', 'channel': 's'}),
     ('Y_len_2s', 'length', {'dir': 'Y', 'edge': '2', 'channel': 's'}),
-    ('Y_sum',    'sum',    {'dir': 'Y'}),
+    ('Y_sum',    'sum',    {'dir': 'Y', 'channel': 's'}),
+    ('Y_rel',    'rel',    {'dir': 'Y'}),
     ('Y_diff_s', 'diff',   {'dir': 'Y', 'channel': 's'}),
     ('Y_diff_e', 'diff',   {'dir': 'Y', 'channel': 'e'}),
 ]
 
 
-def diagnose(df, params, prob='a', re_err=0.1):
+def diagnose(df, params, prob='a', re_err=TOL):
     """Return DataFrame of per-check boolean masks for repair decisions.
 
     Columns: X_len_1s, X_len_2s, X_sum, X_diff_s, X_diff_e,
@@ -462,8 +580,8 @@ def classify(df, params, prob='a', re_err=TOL):
     d = diagnose(df, params, prob, re_err)
     x_start = d[['X_len_1s', 'X_len_2s', 'X_sum', 'X_diff_s']].all(axis=1)
     y_start = d[['Y_len_1s', 'Y_len_2s', 'Y_sum', 'Y_diff_s']].all(axis=1)
-    x_ok = x_start & d['X_diff_e']
-    y_ok = y_start & d['Y_diff_e']
+    x_ok = x_start & d['X_diff_e'] & d['X_rel']
+    y_ok = y_start & d['Y_diff_e'] & d['Y_rel']
 
     return {
         'golden':          x_ok & y_ok & d['tofxy'],

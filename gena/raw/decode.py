@@ -149,20 +149,13 @@ def _scan_engineering(raw_file, config, writer, progress=None):
 
 
 def _quality_masks(l1a, l2, params, probe):
-    soft = np.asarray(flt.soft_std(dir='all', params=params, prob=probe)(l1a), dtype=bool)
-    gold = np.asarray(flt.golden_std(dir='all', params=params, prob=probe)(l1a), dtype=bool)
-    if len(l2):
-        # 90 x 30 mm is the physical start/carbon aperture; without it L2G
-        # would accept starts outside the documented detector area.
-        gold = gold & np.asarray(
-            flt.onboard_eff(
-                l2,
-                c_size=L2G_START_APERTURE_MM,
-                m_size=L2G_END_WINDOW_MM,
-            ),
-            dtype=bool,
-        )
-    return soft, gold
+    soft = flt.level2_soft(l1a, params=params, prob=probe)
+    gold = flt.level2_tight(
+        l1a, l2, params=params, prob=probe,
+        c_size=L2G_START_APERTURE_MM,
+        m_size=L2G_END_WINDOW_MM,
+    )
+    return np.asarray(soft, dtype=bool), np.asarray(gold, dtype=bool)
 
 
 def _convert_events(raw_file, config, engineering, writer, progress=None):

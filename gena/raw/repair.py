@@ -440,7 +440,7 @@ def _repair_method_1(df1a, params, prob):
 
     df1b['Type'] = np.uint8(255)
     df1b['Process_Mask'] = np.uint32(0)
-    df1b.loc[flt.golden_std()(df1b),'Type'] = np.uint8(0)
+    df1b.loc[flt.time_tof_eff()(df1b),'Type'] = np.uint8(0)
 
     quality_cols = ['Xs_valid', 'Ys_valid', 'Xe_valid', 'Ye_valid', 'start_valid','end_valid']
     for k in quality_cols:
@@ -490,7 +490,7 @@ def _repair_method_2(df1a, params, prob):
 
     df1b['Type'] = np.uint8(255)
     df1b['Process_Mask'] = np.uint32(0)
-    df1b.loc[flt.golden_std()(df1b),'Type'] = np.uint8(0)
+    df1b.loc[flt.time_tof_eff()(df1b),'Type'] = np.uint8(0)
 
     quality_cols = ['Xs_valid', 'Ys_valid', 'Xe_valid', 'Ye_valid', 'start_valid','end_valid']
     for k in quality_cols:

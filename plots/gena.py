@@ -11,7 +11,6 @@ from gena import filter as flt
 from gena.constants import init_param
 from gena.post import statistic as sts
 from plots import tools
-from common.interp import i1d
 def _interpolate_nonzero_parameter(pdf, name):
     """Fill zero-valued engineering samples for plotting only."""
     timestamp = pdf["Timestamp"].to_numpy(dtype=float)
@@ -90,9 +89,10 @@ def ho_ratio(l2, window='5min', f=None, ax=None,**kwargs):
     ax[0].plot(tH_n, nH_flux, label='H')
     ax[0].plot(tO_n, nO_flux, label='O')
     ax[0].legend()
-    fh = i1d([t.timestamp() for t in tH_n], nH_flux, bounds_error=False, fill_value=1e9)
-    H_at_Otime = fh([t.timestamp() for t in tO_n])
-    ax[1].plot(tO_n, nO_flux / (H_at_Otime + nO_flux))
+    species = pd.concat([pd.Series(nH_flux, index=tH_n), pd.Series(nO_flux, index=tO_n)],
+                        axis=1).sort_index().fillna(0)
+    total = species.sum(axis=1)
+    ax[1].plot(species.index, species[1] / total.where(total > 0))
     ax[1].set_ylabel('O/Tot')
     f.autofmt_xdate()
     return f, ax
@@ -176,16 +176,15 @@ def end_signal(l1_df, f=None, ax=None, win='5min'):
 
 
 @tools.pass_axes(subplot_spec=(2, 1, True, False))
-def channels(l1a, f=None, ax=None):
-    for name in ['TX_1s', 'TX_2s', 'TY_1s', 'TY_2s']:
-        t, h, _ = sts.hist0d_xy(l1a, name)
-        ax[0].plot(t, h, label=name)
-    for name in ['TX_1e', 'TX_2e', 'TY_1e', 'TY_2e']:
-        t, h, _ = sts.hist0d_xy(l1a, name)
-        ax[1].plot(t, h, label=name)
-    for _ in ax:
-        _.set_yscale('log')
-        _.legend()
+def channels(l1a, f=None, ax=None, *, window="1min"):
+    for axis, edge in zip(ax, "se"):
+        for channel in ("TX_1", "TX_2", "TY_1", "TY_2"):
+            name = channel + edge
+            valid = l1a[name].between(5, 633, inclusive="neither")
+            t, h, _ = sts.window_hist0d(l1a[valid], window=window)
+            axis.plot(t, h, label=name)
+        axis.set_yscale('log')
+        axis.legend()
     f.autofmt_xdate()
     return f, ax
 
@@ -362,7 +361,7 @@ def filter(l1, f=None, ax=None, **kwargs):
     ns_within = ss & ns_check
 
     # Golden standard — all checks pass (replaces old match_eff)
-    golden = flt.golden_std(dir='all')(l1)
+    golden = flt.time_tof_eff(dir='all')(l1)
     golden_match = ss & golden
 
     _add_value_labels(ax, [xlabel[0]], [len(l1)])
@@ -437,13 +436,14 @@ def distribution(df, prob, ssid=1, channels=None, include_zero=True, kind='4', f
 def match_distribution(df, folder='./', gap=10, f=None, ax=None):
     sumx = df['TX_1s'] + df['TX_2s']
     sumy = df['TY_1s'] + df['TY_2s']
-    ratiox, barx = np.histogram(sumx, np.arange(0, np.max(sumx), gap), density=True)
+    bins = np.arange(0, 600 + gap, gap)
+    ratiox, barx = np.histogram(sumx, bins, density=True)
     ax[0].bar(barx[:-1], ratiox, gap)
     ax[0].axvline(45, color='r')
     ax[0].axvline(55, color='r')
     ax[0].set_ylabel('Sum X dist')
     ax[0].set_xlim(0, 600)
-    ratioy, bary = np.histogram(sumx, np.arange(0, np.max(sumy), gap), density=True)
+    ratioy, bary = np.histogram(sumy, bins, density=True)
     ax[1].axvline(35, color='r')
     ax[1].axvline(45, color='r')
     ax[1].bar(bary[:-1], ratioy, gap)
