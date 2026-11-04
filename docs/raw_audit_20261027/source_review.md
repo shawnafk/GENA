@@ -138,4 +138,4 @@ X1e = 2τ_e + C_X − X2e
 
 文档不足以冻结的关键事实仍包括：在轨 TDC 溢出与采样窗口的精确关系、原码 94 的硬件语义、四个主 TOF 槽的顺序及有效标志、FIFO 异常机制、最新在轨通道映射和各方向时延标定。这些应保留为可追踪的参数与假设，避免通过一次全量重算把不确定性固定进科学产品。
 
-本次据此实现的保守生产基线见 [processing_rules_v1.md](processing_rules_v1.md)；确定性验证输入见 [validation_samples_v1](validation_samples_v1/)，真实小文件的包完整性抽查见 [real_sample_audit.json](real_sample_audit.json)。这些文件描述的是 v1 处理程序的可复现性和筛选漏斗，不把合成事件或一次真实文件运行结果当作修复算法的物理真值。
+本次据此实现的保守生产基线见 [processing_rules_v1.md](processing_rules_v1.md)；真实小文件的包完整性抽查见 [real_sample_audit.json](real_sample_audit.json)。这些文件描述的是 v1 处理程序的可复现性和筛选漏斗，不把合成事件或一次真实文件运行结果当作修复算法的物理真值。

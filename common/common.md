@@ -1117,33 +1117,7 @@ print(f"Validated {len(blocks)} examples")
 PY
 ```
 
-### 12.2 回归测试对应关系
-
-| 测试文件 | 主要覆盖 |
-|---|---|
-| `tests/test_common_time.py` | 标量、数组、科学格式、时区、精度、外部对象、异常与空数组 |
-| `tests/test_common_utils.py`、`tests/test_time_ranges.py` | 每日展开与各范围入口 |
-| `tests/test_timeseries_io.py` | 表构造、选择、分段、重复时间、插值、缺口和加载适配 |
-| `tests/test_loader_layouts.py` | 标量/向量/多维数组、静态/采样轴、单位与读取 |
-| `tests/test_common_geometry.py` | FOV 正反向、角度符号、旋转和 SLERP |
-| `tests/test_coord.py`、`tests/test_coord_backends.py` | 本地坐标、姿态、真实后端回转、原点/单位限制、重采样和旧接口 |
-| `tests/test_design_migration.py` 中的配置测试 | 路径、环境变化、输出与目录副作用 |
-| `tests/test_gena_load.py`、`tests/test_load_utils.py` | 加载边界与共享时间格式 |
-| `tests/test_plots.py`、`tests/test_gena_project.py` | 表与几何在绘图、投影中的实际使用 |
-
-```bash
-MPLBACKEND=Agg python -m pytest -q \
-  tests/test_common_time.py tests/test_common_utils.py tests/test_time_ranges.py \
-  tests/test_timeseries_io.py tests/test_loader_layouts.py \
-  tests/test_common_geometry.py tests/test_coord.py tests/test_coord_backends.py \
-  tests/test_gena_load.py tests/test_load_utils.py tests/test_plots.py tests/test_gena_project.py
-
-# 单独检查配置，避免把同文件中其他历史迁移断言算作配置验证。
-MPLBACKEND=Agg python -m pytest -q tests/test_design_migration.py \
-  -k 'runtime_configuration or environment_changes or savefig_uses_runtime_output'
-```
-
-### 12.3 基础模块验收重点
+### 12.2 基础模块验收重点
 
 验证同一时刻的不同表示能够一致转换，并在 pandas/NumPy/Astropy 往返中保留可表示的纳秒；验证构造后的时间列仍为原生 datetime64[ns]；验证空数组与单元素数组不会变成标量；验证 NaT、非法日期、越界时刻和闰秒明确拒绝。表格验证应同时检查缺口、端点包含方式、重复样本处理、离散列的最近邻规则、返回类型和元信息。
 

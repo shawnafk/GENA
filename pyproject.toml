@@ -23,10 +23,5 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8,<10"]
 excel = ["openpyxl>=3.1,<4"]
 3d = ["geopack>=1.0,<2"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "-ra"
