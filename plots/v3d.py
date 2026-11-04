@@ -39,6 +39,17 @@ __all__ = [
     "traces",
 ]
 
+# Pose samples are Unix seconds while scene times are staged as pandas
+# datetime64[ns]; the round-trip moves a sample by up to one float64 unit
+# (about 0.24 us at present epochs). Treat that round-off as inside coverage.
+_TIME_TOLERANCE = 1e-6
+
+#: Legend labels for the satellite body axes and the two probe FOVs. Probe A
+#: uses green and probe B blue, matching the pyramid face colours.
+_AXIS_LABELS = ('sat +X', 'sat +Y', 'sat +Z')
+_PROBE_LABELS = {'A': 'A probe', 'B': 'B probe'}
+
+
 def _format_time(value):
     return pd.Timestamp(value).strftime('%Y-%m-%d %H:%M:%S')
 
@@ -63,24 +74,26 @@ def line(l, color='black', width=2, **kwargs):
     )]
 
 
-def arrow(start, direction, c='blue'):
+def arrow(start, direction, c='blue', name=None, legendrank=None):
     end = np.array(start) + np.array(direction)
     trace = []
     trace.append(go.Scatter3d(
         x=[start[0], end[0]], y=[start[1], end[1]], z=[start[2], end[2]],
-        mode='lines', line=dict(color=c, width=3), showlegend=False,
+        mode='lines', line=dict(color=c, width=3),
+        name=name, legendgroup=name, legendrank=legendrank,
+        showlegend=name is not None,
     ))
     trace.append(go.Cone(
         x=[end[0]], y=[end[1]], z=[end[2]],
         u=[direction[0]], v=[direction[1]], w=[direction[2]],
         sizemode='scaled', sizeref=0.2,
         colorscale=[[0, c], [1, c]],
-        showscale=False, anchor='tip', showlegend=False,
+        showscale=False, anchor='tip', showlegend=False, legendgroup=name,
     ))
     return trace
 
 
-def pyramid(apex, base, facecolor='lightblue'):
+def pyramid(apex, base, facecolor='lightblue', name=None, legendrank=None):
     for i in range(3):
         base[0][i] = apex[i] + base[0][i]
         base[1][i] = apex[i] + base[1][i]
@@ -100,7 +113,7 @@ def pyramid(apex, base, facecolor='lightblue'):
         i=[f[0] for f in faces[:-1]],
         j=[f[1] for f in faces[:-1]],
         k=[f[2] for f in faces[:-1]],
-        color=facecolor, opacity=0.8,
+        color=facecolor, opacity=0.8, showlegend=False,
     ))
     trace.append(go.Scatter3d(
         x=[vertices[i, 0] for i in faces[-1]],
@@ -108,13 +121,19 @@ def pyramid(apex, base, facecolor='lightblue'):
         z=[vertices[i, 2] for i in faces[-1]],
         mode='lines', line=dict(color='red', width=1), showlegend=False,
     ))
+    # A zero-length, colour-matched segment carries the legend entry: Mesh3d
+    # swatches cannot show the cone face colour and size-1 markers are hard to
+    # read in the legend.
     trace.append(go.Scatter3d(
-        x=[apex[0]], y=[apex[1]], z=[apex[2]],
-        mode='markers', marker=dict(color='red', size=1), name='apex',
+        x=[apex[0], apex[0]], y=[apex[1], apex[1]], z=[apex[2], apex[2]],
+        mode='lines', line=dict(color=facecolor, width=10),
+        name=name, legendgroup=name, legendrank=legendrank,
+        showlegend=name is not None, hoverinfo='skip',
     ))
     trace.append(go.Scatter3d(
         x=[p[0] for p in base], y=[p[1] for p in base], z=[p[2] for p in base],
         mode='markers', marker=dict(color='red', size=1), name='base',
+        showlegend=False,
     ))
     for bp in base:
         trace.append(go.Scatter3d(
@@ -228,9 +247,12 @@ def traces(qq, qax, qvxa, qvxb, vscale, gap, moon=None, sats=None):
     trace_qq = point([qq[0], qq[1], qq[2]], color='black', symbol='circle')
 
     qx, qy, qz = qax
-    trace_qq_x = arrow([qq[0], qq[1], qq[2]], qx * vscale, c='red')
-    trace_qq_y = arrow([qq[0], qq[1], qq[2]], qy * vscale, c='green')
-    trace_qq_z = arrow([qq[0], qq[1], qq[2]], qz * vscale, c='blue')
+    trace_qq_x = arrow([qq[0], qq[1], qq[2]], qx * vscale, c='red',
+                       name=_AXIS_LABELS[0], legendrank=12)
+    trace_qq_y = arrow([qq[0], qq[1], qq[2]], qy * vscale, c='green',
+                       name=_AXIS_LABELS[1], legendrank=13)
+    trace_qq_z = arrow([qq[0], qq[1], qq[2]], qz * vscale, c='blue',
+                       name=_AXIS_LABELS[2], legendrank=14)
 
     da = -gap
     db = gap
@@ -245,7 +267,7 @@ def traces(qq, qax, qvxa, qvxb, vscale, gap, moon=None, sats=None):
             [v3a[0], v3a[1], v3a[2]],
             [v4a[0], v4a[1], v4a[2]],
         ],
-        facecolor='green',
+        facecolor='green', name=_PROBE_LABELS['A'], legendrank=10,
     )
     trace_fov_b = pyramid(
         [qq[0] + db * qy[0], qq[1] + db * qy[1], qq[2] + db * qy[2]],
@@ -255,7 +277,7 @@ def traces(qq, qax, qvxa, qvxb, vscale, gap, moon=None, sats=None):
             [v3b[0], v3b[1], v3b[2]],
             [v4b[0], v4b[1], v4b[2]],
         ],
-        facecolor='blue',
+        facecolor='blue', name=_PROBE_LABELS['B'], legendrank=11,
     )
 
     all_traces = [
@@ -293,9 +315,12 @@ def _traces_raw(
 ):
     trace_qq = point([qq[0], qq[1], qq[2]], color='black', symbol='circle')
     qx, qy, qz = qax
-    trace_qq_x = arrow([qq[0], qq[1], qq[2]], qx * vscale, c='red')
-    trace_qq_y = arrow([qq[0], qq[1], qq[2]], qy * vscale, c='green')
-    trace_qq_z = arrow([qq[0], qq[1], qq[2]], qz * vscale, c='blue')
+    trace_qq_x = arrow([qq[0], qq[1], qq[2]], qx * vscale, c='red',
+                       name=_AXIS_LABELS[0], legendrank=12)
+    trace_qq_y = arrow([qq[0], qq[1], qq[2]], qy * vscale, c='green',
+                       name=_AXIS_LABELS[1], legendrank=13)
+    trace_qq_z = arrow([qq[0], qq[1], qq[2]], qz * vscale, c='blue',
+                       name=_AXIS_LABELS[2], legendrank=14)
     da = -gap
     db = gap
     v1a, v2a, v3a, v4a = qvxa * vscale
@@ -308,7 +333,7 @@ def _traces_raw(
             [v3a[0], v3a[1], v3a[2]],
             [v4a[0], v4a[1], v4a[2]],
         ],
-        facecolor='green',
+        facecolor='green', name=_PROBE_LABELS['A'], legendrank=10,
     )
     trace_fov_b = pyramid(
         [qq[0] + db * qy[0], qq[1] + db * qy[1], qq[2] + db * qy[2]],
@@ -318,7 +343,7 @@ def _traces_raw(
             [v3b[0], v3b[1], v3b[2]],
             [v4b[0], v4b[1], v4b[2]],
         ],
-        facecolor='blue',
+        facecolor='blue', name=_PROBE_LABELS['B'], legendrank=11,
     )
     all_traces = [
         *trace_qq,
@@ -486,14 +511,19 @@ def _fov_z0_intersection(spacecraft_position, fov_corners, *, vscale=60):
     return spacecraft_position + scale * direction
 
 
-def _scene_annotation(time, sheet, spacecraft_position, fov_a_corners):
+def _scene_annotation(time, sheet, spacecraft_position, fov_a_corners, *, field_lines=False):
+    layers = [
+        name for name, enabled in (
+            ('field lines', bool(field_lines)),
+            ('neutral sheet', sheet is not None),
+        ) if enabled
+    ]
     lines = [
         '<b>T96 geometry</b>',
         f'UTC: {_format_time(time)}',
+        'T96 layers: ' + (' + '.join(layers) if layers else 'off'),
     ]
-    if sheet is None:
-        lines.append('Neutral sheet: disabled')
-    else:
+    if sheet is not None:
         pressure, dst, by, bz = sheet.parameters
         lines.extend([
             f'Dipole tilt ψ: {sheet.dipole_tilt_degrees:+.2f}°',
@@ -763,6 +793,7 @@ def scene(
                 neutral_sheets[tid],
                 coord_qq['GSM'][tid],
                 np.array([_['GSM'][tid] for _ in va]),
+                field_lines=field_lines[tid],
             )]),
         ))
 
@@ -828,11 +859,24 @@ def scene(
             'text': title,
             'font': {'size': 16},
         },
+        showlegend=True,
+        legend=dict(
+            orientation='h',
+            x=0.01,
+            y=0.99,
+            xanchor='left',
+            yanchor='top',
+            font={'size': 10},
+            bgcolor='rgba(255, 255, 255, 0.78)',
+            bordercolor='rgba(80, 80, 80, 0.35)',
+            borderwidth=1,
+        ),
         annotations=[_scene_annotation(
             st_datetime_list[tid_start],
             neutral_sheets[tid_start],
             coord_qq['GSM'][tid_start],
             np.array([_['GSM'][tid_start] for _ in va]),
+            field_lines=field_lines[tid_start],
         )],
     )
     return fig
@@ -1088,15 +1132,23 @@ class SceneContext:
         timestamps = np.asarray(Time(dates).to_timestamp(), dtype=float)
         if len(timestamps) == 0:
             raise ValueError('at least one scene time is required')
-        if timestamps.min() < self.pose_timestamps[0] or timestamps.max() > self.pose_timestamps[-1]:
+        first = float(self.pose_timestamps[0])
+        last = float(self.pose_timestamps[-1])
+        # Reject genuinely out-of-range times but snap datetime round-off onto
+        # the cached coverage so its boundary samples stay usable.
+        if (
+            timestamps.min() < first - _TIME_TOLERANCE
+            or timestamps.max() > last + _TIME_TOLERANCE
+        ):
             coverage = (
-                pd.to_datetime(self.pose_timestamps[0], unit='s', utc=True),
-                pd.to_datetime(self.pose_timestamps[-1], unit='s', utc=True),
+                pd.to_datetime(first, unit='s', utc=True),
+                pd.to_datetime(last, unit='s', utc=True),
             )
             raise ValueError(
                 f'scene time is outside loaded pose coverage {coverage[0]} to '
                 f'{coverage[1]}'
             )
+        timestamps = np.clip(timestamps, first, last)
         return dates, timestamps
 
     def _evaluate_weather(self, timestamps):
@@ -1274,7 +1326,12 @@ class SceneContext:
             if times.isscalar or len(times.datetime) != 2:
                 raise ValueError("trange must contain exactly two time values")
             start, stop = times.to_timestamp()
-            timestamps = timestamps[(timestamps >= start) & (timestamps <= stop)]
+            # The requested limits pass through datetime64[ns] as well, so keep
+            # pose samples that sit on a limit to within float64 round-off.
+            timestamps = timestamps[
+                (timestamps >= start - _TIME_TOLERANCE)
+                & (timestamps <= stop + _TIME_TOLERANCE)
+            ]
         if len(timestamps) < 2:
             raise ValueError('fewer than two pose samples in requested timerange')
         if len(timestamps) > max_frames:

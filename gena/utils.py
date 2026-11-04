@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from common.constants import RE
-from common.coord import coord as Coord
+from common.coord import coord as Coord, quaternion_array
 from gena.frame import _row_rotations
 from plots.tools import axes_for_columns as _axes_for_columns, column_groups as _column_groups
 
@@ -52,13 +52,14 @@ def _ray_plane_intersection(origins, directions, normal, point, *, forward=True)
     return origins + distance[:, np.newaxis] * directions
 
 
-def pointing_geometry(pdf, *, probe="A", coord="GSM", forward=True):
+def pointing_geometry(pdf, *, probe="A", coord="GSM", forward=True, attitude=None):
     """Return QQ orbit and nominal source-looking FOV intersections.
 
     PDF positions are Moon-relative ECI2000 metres. They are converted to
     Earth-centred ``coord`` positions in Earth radii. The nominal source-looking
     direction is probe-frame ``-Z`` and is intersected with the XY, XZ, and YZ
-    coordinate planes. Invalid pose rows are omitted.
+    coordinate planes. Invalid pose rows are omitted. Pass unit xyzw
+    quaternions in attitude to use rotations aligned to the input rows.
     """
     probe = str(probe).strip().upper()
     if probe not in {"A", "B"}:
@@ -76,27 +77,35 @@ def pointing_geometry(pdf, *, probe="A", coord="GSM", forward=True):
     if len(pdf) == 0:
         return pd.DataFrame(columns=columns)
 
-    pose_columns = [
-        "Timestamp", "MJ2000_Star_X", "MJ2000_Star_Y", "MJ2000_Star_Z",
-        "MJ2000_q1", "MJ2000_q2", "MJ2000_q3",
-    ]
-    missing = [name for name in pose_columns if name not in pdf.columns]
+    position_columns = ["MJ2000_Star_X", "MJ2000_Star_Y", "MJ2000_Star_Z"]
+    vector_columns = ["MJ2000_q1", "MJ2000_q2", "MJ2000_q3"]
+    required = ["Timestamp", *position_columns]
+    if attitude is None:
+        required.extend(vector_columns)
+    missing = [name for name in required if name not in pdf.columns]
     if missing:
         raise KeyError(f"missing pose columns: {missing}")
-    pose_values = pdf[pose_columns].to_numpy(dtype=float)
-    valid = np.isfinite(pose_values).all(axis=1)
-    valid &= (pose_values[:, 2:5] != 0).all(axis=1)
-    valid &= (pose_values[:, 5:8] != 0).all(axis=1)
-    valid &= np.sum(pose_values[:, 5:8] ** 2, axis=1) <= 1.0 + 1e-8
+    positions = pdf[position_columns].to_numpy(dtype=float)
+    valid = np.isfinite(pdf["Timestamp"]) & np.isfinite(positions).all(axis=1)
+    valid &= (positions != 0).any(axis=1)
+    if attitude is None:
+        vectors = pdf[vector_columns].to_numpy(dtype=float)
+        valid &= np.isfinite(vectors).all(axis=1) & (vectors != 0).any(axis=1)
+        valid &= np.sum(vectors ** 2, axis=1) <= 1.0 + 1e-8
     pose = pdf.loc[valid].reset_index(drop=True)
     if len(pose) == 0:
         return pd.DataFrame(columns=columns)
 
     dates = pose["Datetime"].to_list()
-    rotation = _row_rotations(pose)
+    if attitude is None:
+        rotation = _row_rotations(pose)
+    else:
+        rotation = quaternion_array(attitude, count=len(pdf))
+        if len(rotation) != 1:
+            rotation = rotation[valid]
     moon_eci2000_m = np.asarray(epms.moon(dates), dtype=float) * 1000.0
     earth_centered_eci2000_re = (
-        pose[["MJ2000_Star_X", "MJ2000_Star_Y", "MJ2000_Star_Z"]].to_numpy(dtype=float) + moon_eci2000_m
+        positions[valid] + moon_eci2000_m
     ) / RE
     spacecraft = Coord(dates, earth_centered_eci2000_re, "ECI2000", 0)
     spacecraft.convert(coord)

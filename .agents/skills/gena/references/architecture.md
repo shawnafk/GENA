@@ -249,6 +249,8 @@ xyz = get_projection(l2, prob="A", coord="GSM")
 table = dump(l2, prob="A", coord="GSM")
 ```
 
+Projection results preserve event order and row count. Events with missing or invalid attitude have NaN directions and intersections.
+
 ### Available models and historical modules
 
 `libs.flux` contains `j_maxwell`, `j_kappa`, `j_dual_model`, `fit_dual_moment_constrained`, and `qk_estimate_ena_counts`. Its `integral_ena_counts` is an unfinished draft that raises `NotImplementedError`. `gena.post.ena_drift`, `libs.distribution`, `libs.energy_transport`, `libs.bbf_ena`, and `libs.ena_response` are absent from the current source tree. Do not offer them as callable APIs. `libs.spectrum.normalize_flux_by_energy_band` is shared by GENA statistics and THEMIS spectra.

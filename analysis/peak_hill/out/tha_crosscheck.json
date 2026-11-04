@@ -1,0 +1,52 @@
+{
+  "probe": "A",
+  "records": 944,
+  "windows": {
+    "Peak (T1)": {
+      "records": 494,
+      "counts_per_min": 34.257407407407406,
+      "anisotropy_mean": 0.16149036081473572,
+      "aligned_fraction_mean": 0.16751403313987615,
+      "gain_los_mean": 0.9604181129447938,
+      "gain_mirror_mean": 0.9578882600227188,
+      "predicted": 4.387071821491488e-13,
+      "predicted_iso": 4.5471913799414814e-13
+    },
+    "Hill (T2)": {
+      "records": 105,
+      "counts_per_min": 4.598809523809524,
+      "anisotropy_mean": -0.2126370442852383,
+      "aligned_fraction_mean": 0.09954317034975915,
+      "gain_los_mean": 0.9289781067891845,
+      "gain_mirror_mean": 0.931479578536792,
+      "predicted": 3.620009479837401e-13,
+      "predicted_iso": 3.901076462102558e-13
+    },
+    "Peak burst": {
+      "records": 91,
+      "counts_per_min": 106.82666666666667,
+      "anisotropy_mean": 0.014845265143790514,
+      "aligned_fraction_mean": 0.14051318694039688,
+      "gain_los_mean": 1.0317592006490206,
+      "gain_mirror_mean": 1.031161138118597,
+      "predicted": 5.348137372646163e-13,
+      "predicted_iso": 5.022747550303394e-13
+    },
+    "Hill core": {
+      "records": 105,
+      "counts_per_min": 4.598809523809524,
+      "anisotropy_mean": -0.2126370442852383,
+      "aligned_fraction_mean": 0.09954317034975915,
+      "gain_los_mean": 0.9289781067891845,
+      "gain_mirror_mean": 0.931479578536792,
+      "predicted": 3.620009479837401e-13,
+      "predicted_iso": 3.901076462102558e-13
+    }
+  },
+  "ratio_burst_core": {
+    "counts": 23.229200103546468,
+    "ion_production": 1.287528608858974,
+    "ion_and_pa": 1.4773821456639897,
+    "pa_gain": 1.110638876318708
+  }
+}

@@ -740,7 +740,7 @@ def time_averaged_particle_moments(
 
 def flux(esa, sst, prob=None, tspan=None, plot=False, f=None, ax=None, *,
           esa_key='peir_en_eflux', sst_key='psif_en_eflux', prefix=None,
-          en=True, normalized=False, E_norm=None):
+          en=False, normalized=False, E_norm=None):
     """Compute one cleaned ESA+SST average spectrum and optionally plot it.
 
     The historical name is retained for compatibility. Set ``en=False`` for

@@ -17,7 +17,7 @@ from load.loaders.spedas import load_spedas
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["load", "load_pos", "load_sw"]
+__all__ = ["load", "load_pos", "load_rot", "load_sw"]
 
 
 #: What ``product``, ``probe`` and ``key`` mean for each mission. ``key`` is
@@ -38,7 +38,7 @@ def load(mission, trange, product=None, *, probe=None, key=None, **kwargs):
 
     ``mission`` selects the role of the other arguments:
 
-    - ``gena``: ``product`` is a Parquet suffix such as ``l2s_a``; there is no
+    - ``gena``: ``product`` is a Parquet suffix such as ``l2m_a``; there is no
       separate probe (it is encoded in the suffix); ``key`` selects columns
       (``key="Energy"``) and is equivalent to ``columns=[...]``.
     - ``themis`` / ``mms``: ``product`` is the instrument product (``esa``,
@@ -164,17 +164,17 @@ def load_sw(t, *, trange_pad="1h", **kwargs):
 
 
 # Explicit convenience operations using the public loaders.
-def _position_times(value):
-    """Normalize position evaluation times and return dates plus Unix seconds."""
+def _evaluation_times(value):
+    """Normalize evaluation times and return dates plus Unix seconds."""
     times = Time(value)
     dates = pd.DatetimeIndex([times.datetime]) if times.isscalar else times.datetime
     if dates.empty:
-        raise ValueError("at least one probe-position time is required")
+        raise ValueError("at least one evaluation time is required")
     return times, dates, np.asarray(times.to_timestamp(), dtype=float)
 
 
-def _padded_position_range(dates):
-    """Return a one-hour-padded ISO range for a position backend request."""
+def _padded_evaluation_range(dates):
+    """Return a one-hour-padded ISO range for a backend request."""
     pad = pd.Timedelta("1h")
     return [(dates.min() - pad).isoformat(), (dates.max() + pad).isoformat()]
 
@@ -194,8 +194,8 @@ def _interpolate_position(variable, evaluation):
 
 def _backend_position(value, variable_name, reader):
     """Load and interpolate a named backend position variable."""
-    times, dates, evaluation = _position_times(value)
-    raw = reader(_padded_position_range(dates), variable_name)
+    times, dates, evaluation = _evaluation_times(value)
+    raw = reader(_padded_evaluation_range(dates), variable_name)
     if variable_name not in raw:
         available = ", ".join(sorted(raw)[:8])
         raise KeyError(f"position variable {variable_name!r} was not returned; available: {available}")
@@ -295,7 +295,7 @@ def _get_goes_loc(t, satellite, coord="gsm", *, download=None, **kwargs):
     return _backend_position(t, variable_name, reader)
 
 
-def _get_queqiao_loc(t, satellite=None):
+def _get_queqiao_loc(t, satellite=None, *, bounds_error=True):
     """Interpolate the Queqiao position recorded in GENA PDF engineering data.
 
     The PDF position columns are Moon-relative MJ2000 coordinates in metres.
@@ -303,13 +303,13 @@ def _get_queqiao_loc(t, satellite=None):
     is currently ignored because the configured PDF contains one Queqiao
     spacecraft trajectory.
     """
-    times, dates, _ = _position_times(t)
+    times, dates, _ = _evaluation_times(t)
     frame = load_gena(
-        trange=_padded_position_range(dates),
+        trange=_padded_evaluation_range(dates),
         product="pdf",
         columns=["MJ2000_Star_X", "MJ2000_Star_Y", "MJ2000_Star_Z"],
     )
-    result = frame.pos_at(times)
+    result = frame.pos_at(times, bounds_error=bounds_error)
     return result[0] if times.isscalar else result
 
 
@@ -320,7 +320,7 @@ def load_pos(mission, trange, id=None, *, coord="gsm", **kwargs):
     The result is one ``(x, y, z)`` vector for a scalar and an ``(N, 3)``
     array otherwise. THEMIS ids are ``a``-``e``, MMS
     ids are ``1``-``4``, and GOES ids are spacecraft numbers. Queqiao uses the
-    local GENA PDF orbit.
+    local GENA PDF orbit. Pass bounds_error=False for NaN outside coverage.
     """
     key = str(mission).strip().lower()
     if key == "themis":
@@ -332,5 +332,34 @@ def load_pos(mission, trange, id=None, *, coord="gsm", **kwargs):
             raise ValueError("id is required for GOES")
         return _get_goes_loc(trange, id, coord=coord, **kwargs)
     if key in {"queqiao", "qq", "gena"}:
-        return _get_queqiao_loc(trange, id)
+        return _get_queqiao_loc(trange, id, bounds_error=kwargs.get("bounds_error", True))
     raise ValueError("mission must be 'themis', 'mms', 'goes', or 'queqiao'")
+
+
+def load_rot(mission, trange, *, bounds_error=True):
+    """Return interpolated Queqiao MJ2000 attitude as unit xyzw quaternions.
+
+    Accepts the mission names queqiao, qq, and gena. A scalar evaluation
+    time returns shape (4,), and a sequence returns shape (N, 4) in the
+    requested order. Interpolation uses SLERP within valid PDF coverage.
+    Set bounds_error=False to return NaN rows outside that coverage.
+    """
+    if str(mission).strip().lower() not in {"queqiao", "qq", "gena"}:
+        raise ValueError("load_rot supports the Queqiao attitude recorded in GENA PDF")
+    times, dates, evaluation = _evaluation_times(trange)
+    frame = load_gena(
+        trange=_padded_evaluation_range(dates),
+        product="pdf",
+        columns=["MJ2000_q1", "MJ2000_q2", "MJ2000_q3"],
+        optional_columns=["PosePresent"],
+    )
+    if bounds_error:
+        result = frame.rot_at(times).as_quat()
+    else:
+        from common.coord import interpolate_quaternions
+
+        source, rotations = frame._rot_from_pdf()
+        covered = (evaluation >= source[0]) & (evaluation <= source[-1])
+        result = np.full((len(evaluation), 4), np.nan)
+        result[covered] = interpolate_quaternions(source, rotations, evaluation[covered])
+    return result[0] if times.isscalar else result

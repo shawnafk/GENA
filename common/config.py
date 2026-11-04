@@ -9,7 +9,7 @@ __all__ = ["resolve_paths", "configure", "get_configured_paths", "resolve_output
 _RUNTIME_FILE_BASE = None
 _RUNTIME_OUTPUT_DIR = None
 _CONFIG_CACHE = {}
-
+_default_base = "./"
 
 def resolve_paths(file_base=None, *, output_dir=None):
     """Resolve paths without validation or directory creation.
@@ -19,7 +19,7 @@ def resolve_paths(file_base=None, *, output_dir=None):
     GENA_OUTPUT_DIR (or output_dir) selects an independent result directory.
     """
     base = file_base if file_base is not None else _RUNTIME_FILE_BASE
-    base = Path(base or os.environ.get("FILE_BASE", "/Volumes/Rsync/ENA/")).expanduser().resolve()
+    base = Path(base or os.environ.get("FILE_BASE", _default_base)).expanduser().resolve()
     paths = {"file_base": str(base)}
     for name, key in (("GENA_RAW", "raw"), ("GENA_PQT", "pqt"),
                       ("SPEDAS", "spedas"), ("GENA_RES", "res")):

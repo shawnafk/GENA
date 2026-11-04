@@ -1,0 +1,106 @@
+{
+  "ena": {
+    "Peak (T1)": {
+      "events": 40861,
+      "seconds": 115200.0,
+      "counts_per_min": 21.281770833333333
+    },
+    "Hill (T2)": {
+      "events": 5156,
+      "seconds": 136800.0,
+      "counts_per_min": 2.26140350877193
+    },
+    "Peak burst": {
+      "events": 32048,
+      "seconds": 18000.0,
+      "counts_per_min": 106.82666666666667
+    },
+    "Hill core": {
+      "events": 3863,
+      "seconds": 50400.0,
+      "counts_per_min": 4.598809523809524
+    }
+  },
+  "pa": {
+    "Peak (T1)": {
+      "records": 251,
+      "los_pa_median": 148.89766672574999,
+      "los_pa_p16": 28.647169513378344,
+      "los_pa_p84": 169.55951627238224,
+      "predicted": 1.9234495504624245e-14,
+      "predicted_mirror": 2.2771178548921774e-14,
+      "predicted_iso": 1.685181529098245e-14,
+      "los_velocity_cosine": 0.8928597457567891,
+      "anisotropy_mean": 0.38657886799799973,
+      "aligned_fraction_mean": 0.21653656695363974,
+      "anisotropy_by_band": {
+        "4-6 keV": 0.35984184824744725,
+        "6-10 keV": 0.4445427737265324,
+        "10-15 keV": 0.39789621075594245,
+        "15-25 keV": 0.33632480076577187
+      },
+      "gain_los_mean": 1.0644041830962137,
+      "gain_mirror_mean": 1.2853233461860614
+    },
+    "Hill (T2)": {
+      "records": 283,
+      "los_pa_median": 33.329890512027525,
+      "los_pa_p16": 11.074614137391762,
+      "los_pa_p84": 160.14339808781247,
+      "predicted": 3.557719557443195e-15,
+      "predicted_mirror": 2.9976046790289047e-15,
+      "predicted_iso": 2.0402623068701053e-15,
+      "los_velocity_cosine": 0.9715275320990624,
+      "anisotropy_mean": 0.47554551560091446,
+      "aligned_fraction_mean": 0.2429601603774103,
+      "anisotropy_by_band": {
+        "4-6 keV": 0.45271230830161824,
+        "6-10 keV": 0.5313549625835838,
+        "10-15 keV": 0.4854133155031413,
+        "15-25 keV": 0.4262187723167796
+      },
+      "gain_los_mean": 1.6017193050819578,
+      "gain_mirror_mean": 1.34545069517252
+    },
+    "Peak burst": {
+      "records": 16,
+      "los_pa_median": 149.6543966549678,
+      "los_pa_p16": 136.3287848312473,
+      "los_pa_p84": 157.80528409426196,
+      "predicted": 6.882429274055417e-14,
+      "predicted_mirror": 8.704060886466621e-14,
+      "predicted_iso": 6.673048139488121e-14,
+      "los_velocity_cosine": 0.6725837134226049,
+      "anisotropy_mean": 0.17035466524402376,
+      "aligned_fraction_mean": 0.16020523058533398,
+      "anisotropy_by_band": {
+        "4-6 keV": 0.16711677843340852,
+        "6-10 keV": 0.18954247387870599,
+        "10-15 keV": 0.11584247762247017,
+        "15-25 keV": 0.1800418938254259
+      },
+      "gain_los_mean": 1.0261344012400702,
+      "gain_mirror_mean": 1.2507651858607365
+    },
+    "Hill core": {
+      "records": 138,
+      "los_pa_median": 137.6440947931431,
+      "los_pa_p16": 22.951516398635626,
+      "los_pa_p84": 172.03187347713708,
+      "predicted": 2.6962885139996713e-14,
+      "predicted_mirror": 3.1052085852645605e-14,
+      "predicted_iso": 2.4222743457708865e-14,
+      "los_velocity_cosine": 0.7762170455791431,
+      "anisotropy_mean": 0.47040706877338506,
+      "aligned_fraction_mean": 0.24196953314219108,
+      "anisotropy_by_band": {
+        "4-6 keV": 0.44029987306388724,
+        "6-10 keV": 0.5260461584665828,
+        "10-15 keV": 0.4894939553039543,
+        "15-25 keV": 0.4202781336696515
+      },
+      "gain_los_mean": 1.034861760049637,
+      "gain_mirror_mean": 1.2221677056514444
+    }
+  }
+}

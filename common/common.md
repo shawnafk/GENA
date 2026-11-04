@@ -232,7 +232,7 @@ class ParameterDataFrame(TimeSeriesDataFrame):
         return slerp_without_extrapolation(source_time, source_rotation, times)
 ```
 
-同一文件中的 `split_time_intervals()` 只接收原生 pandas datetime，不再经过 `Time`；`concat()` 负责按时间拼接、排序、去重并合并变量说明；`read_variable()` 根据 `frame.attrs["variables"]` 读取标量、三分量向量或数组变量。这些是表格层的操作，不负责解释 CDF、Parquet 或任务专用字段。
+同一文件中的 `split_time_intervals()` 只接收原生 pandas datetime，不再经过 `Time`；`concat()` 负责按输入顺序拼接、保留全部行并合并变量说明；`read_variable()` 根据 `frame.attrs["variables"]` 读取标量、三分量向量或数组变量。这些是表格层的操作，不负责解释 CDF、Parquet 或任务专用字段。
 
 ```python
 # example: core_frame_usage
@@ -357,7 +357,7 @@ flowchart TD
 
 四元数顺序统一为 SciPy 使用的 `[x, y, z, w]`，保存为单位四元数行 `(1, 4)` 或 `(N, 4)`；单个姿态可以广播。QQ 姿态的含义是 QQ → ECI2000，按 `R @ v` 应用。四元数 `q` 与 `-q` 表示同一个旋转。坐标系、单位和原点不能仅从三个分量的数值推断。
 
-### 3.3 元信息与修改责任
+### 3.3 元信息
 
 `frame.attrs` 保存来源、产品、probe 等信息；`attrs["variables"]` 保存变量布局、单位和轴说明，详见第 6 节。它是普通字典，不是自动检验所有列的机制。删除或重命名变量列时，调用方需同步修改相关说明。
 
@@ -649,11 +649,11 @@ assert bins.tolist() == [0., 10., 20.]
 
 ### 6.1 concat
 
-`concat(frames)` 按 pandas 列并集拼接、按 `Datetime` 稳定排序、相同时间保留输入顺序中的第一行，重置索引。返回第一张表的 `_constructor` 所决定的类型，其他普通 `attrs` 取第一张表；`attrs["variables"]` 按输入顺序合并，同名变量说明以后来的为准。数据冲突和元信息冲突采用不同规则，拼接前应保证同名变量布局兼容。
+`concat(frames)` 按 pandas 列并集拼接，保留各输入表的顺序及表内行顺序，不按 `Datetime` 排序或去重，重置索引。返回第一张表的 `_constructor` 所决定的类型，其他普通 `attrs` 取第一张表；`attrs["variables"]` 按输入顺序合并，同名变量说明以后来的为准。相同时间戳的行全部保留，拼接前应保证同名变量布局兼容。
 
-去重是整行保留，不会用后面的行填补第一行的 NaN。它适合按时间唯一的连续量或已由加载器正确整理的区间结果；多个合法事件可能发生在同一时刻，事件合并不能不加判断地使用按时间去重。需要保留全部事件时，使用普通 pandas 拼接，再按该产品真实的事件身份处理重复。
+多个合法事件可能发生在同一时刻，例如 A、B 探头的同时事件，因此拼接保留全部事件行。需要排序或去重时，由调用者根据具体产品显式处理。
 
-空输入 `concat([])` 返回空 `TimeSeriesDataFrame`，包含规范的 `Datetime` 与浮点 `Timestamp`。输入为普通 DataFrame 时，函数不替调用方转换时间或补充列；没有 `Datetime` 就不会执行时间排序与去重。不要把函数注释中的 UTC 描述理解为所有普通输入都会被自动规范化。
+空输入 `concat([])` 返回空 `TimeSeriesDataFrame`，包含规范的 `Datetime` 与浮点 `Timestamp`。输入为普通 DataFrame 时，函数不替调用方转换时间或补充列。普通输入不会被自动规范化。
 
 ```python
 # example: concat_precedence
@@ -665,8 +665,9 @@ second = TimeSeriesDataFrame({"Datetime": [10, 20], "B": [99., 3.], "n": [4., 5.
 first.attrs = {"source": "first", "variables": {"B": {"kind": "scalar", "columns": ["B"], "units": "nT"}}}
 second.attrs = {"source": "second", "variables": {"n": {"kind": "scalar", "columns": ["n"]}}}
 joined = concat([first, second])
-assert joined["Datetime"].dt.second.tolist() == [0, 10, 20]
-assert np.isnan(joined["B"].iloc[1])  # 整行采用 first，不用 second 的 99 填充。
+assert joined["Datetime"].dt.second.tolist() == [10, 0, 10, 20]
+assert np.isnan(joined["B"].iloc[0])  # 保留 first 的缺测值以及 second 同时刻的独立行。
+assert joined["B"].iloc[2] == 99.
 assert joined.attrs["source"] == "first"
 assert set(joined.attrs["variables"]) == {"B", "n"}
 assert concat([]).empty and "Timestamp" in concat([])

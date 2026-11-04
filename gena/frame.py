@@ -15,17 +15,26 @@ __all__ = ["ParticleDataFrame", "ParameterDataFrame"]
 _ROTATION_COLUMNS = ["MJ2000_q1", "MJ2000_q2", "MJ2000_q3"]
 
 
-def _row_rotations(frame):
-    """Build row-aligned rotations directly from stored quaternion columns."""
+def _row_quaternions(frame):
+    """Reconstruct row-aligned xyzw quaternions, leaving invalid rows as NaN."""
     missing = [name for name in _ROTATION_COLUMNS if name not in frame.columns]
     if missing:
         raise KeyError(f"rotation columns are missing: {missing}")
     vector = frame[_ROTATION_COLUMNS].to_numpy(dtype=float)
     squared = np.sum(vector**2, axis=1)
-    if not np.isfinite(vector).all() or np.any(squared > 1.0 + 1e-8):
-        raise ValueError("rotation rows must contain finite quaternion vector components with norm <= 1")
+    # Match the raw conversion tolerance for stored float32 attitude components.
+    valid = np.isfinite(squared) & (squared <= 1.0 + 1e-6)
     scalar = np.sqrt(np.clip(1.0 - squared, 0.0, 1.0))
     quaternion = np.column_stack([vector, scalar])
+    quaternion[~valid] = np.nan
+    return quaternion
+
+
+def _row_rotations(frame):
+    """Build rotations for a frame with valid stored attitude in every row."""
+    quaternion = _row_quaternions(frame)
+    if not np.isfinite(quaternion).all():
+        raise ValueError("rotation rows must contain finite quaternion vector components with norm <= 1")
     return Rotation.from_quat(quaternion)
 
 
@@ -97,7 +106,7 @@ class ParameterDataFrame(TimeSeriesDataFrame):
         values = values[unique][::gap]
         return values[:, 0], values[:, 1:]
 
-    def _rot_from_pdf(self, gap=1, norm_tol=0.1):
+    def _rot_from_pdf(self, gap=1, norm_tol=5e-7):
         """Return sorted valid MJ2000 rotations from this PDF frame."""
         if not isinstance(gap, (int, np.integer)) or gap < 1:
             raise ValueError("gap must be a positive integer")
@@ -115,7 +124,12 @@ class ParameterDataFrame(TimeSeriesDataFrame):
         quaternion = np.column_stack([vector, scalar])
         norms = np.linalg.norm(quaternion, axis=1)
         valid = np.isfinite(values).all(axis=1)
-        valid &= (vector != 0).all(axis=1)
+        present = (vector != 0).any(axis=1)
+        if "PosePresent" in self.columns:
+            # Legacy PDFs omit the flag and encode absent attitude as three zeros.
+            flag = self["PosePresent"].astype("boolean")
+            present = np.where(flag.isna(), present, flag.to_numpy(dtype=bool, na_value=False))
+        valid &= present
         valid &= np.isfinite(norms)
         valid &= (norms >= 1.0 - norm_tol) & (norms <= 1.0 + norm_tol)
         timestamps = values[valid, 0]
@@ -132,7 +146,7 @@ class ParameterDataFrame(TimeSeriesDataFrame):
         quaternion = quaternion[unique][::gap]
         return timestamps.tolist(), Rotation.from_quat(quaternion)
 
-    def pos_at(self, times):
+    def pos_at(self, times, *, bounds_error=True):
         """Linearly interpolate valid PDF positions at arbitrary UTC times."""
         evaluation = _evaluation_timestamps(times)
         if len(evaluation) == 0:
@@ -140,13 +154,17 @@ class ParameterDataFrame(TimeSeriesDataFrame):
         source, positions = self._loc_from_pdf()
         if len(source) == 0:
             raise ValueError("no valid PDF position samples")
-        if len(source) == 1:
-            if np.any(evaluation != source[0]):
+        covered = (evaluation >= source[0]) & (evaluation <= source[-1])
+        if bounds_error and not covered.all():
+            if len(source) == 1:
                 raise ValueError("position interpolation requires at least two source samples")
-            return np.repeat(positions, len(evaluation), axis=0)
-        if np.any(evaluation < source[0]) or np.any(evaluation > source[-1]):
             raise ValueError("position evaluation times are outside PDF coverage")
-        return i_pos(source, positions, evaluation, extrapolate=False)
+        result = np.full((len(evaluation), 3), np.nan)
+        if len(source) == 1:
+            result[covered] = positions
+        else:
+            result[covered] = i_pos(source, positions, evaluation[covered], extrapolate=False)
+        return result
 
     def rot_at(self, times):
         """SLERP valid PDF attitudes at arbitrary UTC times."""

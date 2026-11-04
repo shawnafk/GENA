@@ -213,7 +213,7 @@ def init_param(SN_ID):
     # Cast before the closure is created so the callable and the public mapping
     # share exactly the same dictionary.  Mutating a calibration coefficient in
     # the returned mapping now also updates the conversion performed below.
-    params = cast_dict_to_float32(params)
+    #params = cast_dict_to_float32(params)
 
     def ns_2_xy(df, flag, prob, prefix=''):
         """Convert TDC nanoseconds to X/Y coordinates."""

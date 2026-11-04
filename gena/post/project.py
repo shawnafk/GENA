@@ -1,7 +1,8 @@
 import common.coord as gcd
 from common.coord import fov_to_vector, vector_to_fov
-from load import load
-from gena.frame import ParameterDataFrame, _row_rotations
+from common.time import Time
+from load import load, load_pos, load_rot
+from gena.frame import ParameterDataFrame, _row_quaternions
 from gena import utils as gena_utils
 from common.constants import RE, RM
 from common.frame import split_time_intervals
@@ -21,10 +22,27 @@ __all__ = [
     "get_ray",
     "get_frame",
     "get_projection",
+    "get_instrument_projection",
     "ray_sphere_intersections",
     "moon_blocking_mask",
     "moon_blocking_intervals",
 ]
+
+
+def _event_attitude(events):
+    quaternions = _row_quaternions(events)
+    valid = np.isfinite(quaternions[:, 3])
+    # The coordinate API requires finite rotations. Mask vectors on these rows
+    # so the placeholder rotations cannot produce a physical direction.
+    quaternions[~valid] = (0.0, 0.0, 0.0, 1.0)
+    return quaternions, valid
+
+
+def _event_coord(dates, vectors, probe, coord, attitude):
+    quaternions, valid = attitude
+    ray = gcd.coord(dates, np.where(valid[:, None], vectors, np.nan), probe, quaternions)
+    ray.convert(coord)
+    return ray
 
 
 def axial_mean_angle(angle_deg, weights=None) -> float:
@@ -134,7 +152,7 @@ def projected_fov_axis_angle(
         py[1] = offset_deg
 
     dates = pd.to_datetime(l2df["Timestamp"].to_numpy(dtype=float), unit="s").to_list()
-    rotation = _row_rotations(l2df)
+    attitude = _event_attitude(l2df)
     start = np.asarray(get_spacecraft_pos(l2df, coord)[coord], dtype=float)
     intersections = []
     for px_side, py_side in zip(px, py):
@@ -143,8 +161,7 @@ def projected_fov_axis_angle(
             -np.tan(np.deg2rad(py_side)),
             np.ones(n_rows, dtype=float),
         ))
-        ray = gcd.coord(dates, flight, prob, rotation)
-        ray.convert(coord)
+        ray = _event_coord(dates, flight, prob, coord, attitude)
         intersections.append(project(start, ray[coord], norm, point))
 
     delta = intersections[1] - intersections[0]
@@ -169,14 +186,13 @@ def event_vectors(events, *, coord="GSM", probe="A"):
             target[name] = np.array([], dtype=float)
         return target
     dates = target["Datetime"].to_list()
-    rotation = _row_rotations(target)
+    attitude = _event_attitude(target)
     ray_probe = np.column_stack((
         target["X2"].to_numpy(dtype=float) - target["X1"].to_numpy(dtype=float),
         target["Y2"].to_numpy(dtype=float) - target["Y1"].to_numpy(dtype=float),
         np.full(len(target), 50.0),
     ))
-    ray = gcd.coord(dates, ray_probe, probe, rotation)
-    ray.convert(coord)
+    ray = _event_coord(dates, ray_probe, probe, coord, attitude)
     direction = np.asarray(ray[coord], dtype=float)
     norms = np.linalg.norm(direction, axis=1)
     direction = np.divide(
@@ -185,8 +201,7 @@ def event_vectors(events, *, coord="GSM", probe="A"):
         out=np.full_like(direction, np.nan),
         where=norms[:, np.newaxis] > 0,
     )
-    velocity = gcd.coord(dates, gena_utils.get_velocity(target), probe, rotation)
-    velocity.convert(coord)
+    velocity = _event_coord(dates, gena_utils.get_velocity(target), probe, coord, attitude)
     target.loc[:, ["DX", "DY", "DZ"]] = direction
     target.loc[:, ["VX", "VY", "VZ"]] = np.asarray(velocity[coord], dtype=float)
     target.attrs = dict(events.attrs)
@@ -244,11 +259,11 @@ def project(start, dir, plane_normal=np.array([0,1,0]), plane_point=np.array([0,
     plane_point = np.atleast_1d(plane_point)
     
     # 1. 计算法向量与方向向量的点积（n·d）
-    n_dot_d = np.dot(dir, plane_normal.T).squeeze()  # 形状：(N,)
+    n_dot_d = np.dot(dir, plane_normal.T).reshape(-1)  # 形状：(N,)
     
     # 2. 计算分子部分：n·(r0 - s)
     r0_minus_s = plane_point - start  # 形状：(N, 3)
-    n_dot_r0s = np.dot(r0_minus_s, plane_normal.T).squeeze()  # 形状：(N,)
+    n_dot_r0s = np.dot(r0_minus_s, plane_normal.T).reshape(-1)  # 形状：(N,)
     
     # 3. 初始化t数组，默认设为nan（无效值）
     t = np.full_like(n_dot_d, np.nan, dtype=np.float64)
@@ -326,42 +341,147 @@ def get_spacecraft_pos(l2df, coord='GSM'):
     return start
 
 def get_ray(l2df,prob='A',coord='GSM'):
+    """Convert event flight vectors, retaining NaN rows for invalid attitude."""
     ts_list = l2df['Timestamp'].to_list()
     pd_date = pd.to_datetime(ts_list,unit='s').to_list()
-    qq_rot = _row_rotations(l2df)
+    attitude = _event_attitude(l2df)
     # Particle flight is layer 1 -> layer 2.  The source-looking vector defined
     # in the GENA geometry note is its exact negative,
     # (X1-X2, Y1-Y2, -50).  A line-plane projection is invariant when the full
     # direction vector is negated, so this convention cannot mirror Y or Z.
     vec_in_qq = np.column_stack((l2df['X2']-l2df['X1'],l2df['Y2']-l2df['Y1'],np.ones(len(l2df))*50))
-    ray = gcd.coord(pd_date,vec_in_qq,prob,qq_rot)
-    ray.convert(coord)
-    return ray
+    return _event_coord(pd_date, vec_in_qq, prob, coord, attitude)
 
 def get_frame(l2df,prob='A',coord='GSM'):
+    """Convert each event's probe axes, retaining NaN rows for invalid attitude."""
     ts_list = l2df['Timestamp'].to_list()
     pd_date = pd.to_datetime(ts_list,unit='s').to_list()
-    qq_rot = _row_rotations(l2df)
+    attitude = _event_attitude(l2df)
     #end - start
     qqx = np.column_stack((np.ones(len(l2df)),np.ones(len(l2df))*0,np.ones(len(l2df))*0))
     qqy = np.column_stack((np.ones(len(l2df))*0,np.ones(len(l2df)),np.ones(len(l2df))*0))
     qqz = np.column_stack((np.ones(len(l2df))*0,np.ones(len(l2df))*0,np.ones(len(l2df))))
-    rayx = gcd.coord(pd_date,qqx,prob,qq_rot)
-    rayx.convert(coord)
-    
-
-    rayy = gcd.coord(pd_date,qqy,prob,qq_rot)
-    rayy.convert(coord)
-    
-    rayz = gcd.coord(pd_date,qqz,prob,qq_rot)
-    rayz.convert(coord)
+    rayx = _event_coord(pd_date, qqx, prob, coord, attitude)
+    rayy = _event_coord(pd_date, qqy, prob, coord, attitude)
+    rayz = _event_coord(pd_date, qqz, prob, coord, attitude)
     return rayx,rayy,rayz
 
 def get_projection(l2df,prob='A',coord='GSM',norm=[0,1,0],point=[0,0,0]):
+    """Return one plane intersection per event, with NaN for invalid geometry."""
     ray = get_ray(l2df,prob,coord)
     start = get_spacecraft_pos(l2df, coord)
     proj = project(start[coord],ray[coord],norm,point)[:]
     return proj
+
+
+def _earth_limb(observer, distance, samples):
+    """Sample the tangent circle on a spherical Earth of radius 1 R_E."""
+    axis = observer / distance
+    reference = np.eye(3)[np.argmin(np.abs(axis))]
+    u = np.cross(axis, reference)
+    u /= np.linalg.norm(u)
+    v = np.cross(axis, u)
+    phase = np.linspace(0, 2 * np.pi, samples)
+    circle = np.cos(phase)[:, None] * u + np.sin(phase)[:, None] * v
+    return axis / distance + np.sqrt(1 - distance**-2) * circle
+
+
+def get_instrument_projection(time, *, prob="A", l_shells=(4, 8),
+                              mlt_hours=(0, 6, 12, 18), samples=181,
+                              magnetotail=False):
+    """Project Earth and dipole reference lines into a GENA angular image.
+
+    Evaluate one scalar UTC time (or Unix timestamp), usually the center of
+    the ENA accumulation interval. Use interpolated Queqiao position and
+    attitude and the probe's source-looking -Z convention. Magnetic local
+    times are specified in SM, with noon along +X and dusk along +Y.
+
+    Return `time_utc`, `probe`, `earth_distance_re`, `earth_center` (shape
+    (2,)), `earth_limb` (samples by 2), and `field_lines` (a list of records
+    with `l_shell`, `mlt_hours` and `px_py`). All pixel coordinates are
+    PX/PY angles in degrees, ready to overlay on the event histogram. Points
+    behind the probe are NaN. Detector aperture clipping and occultation of
+    the reference curves by Earth are left to the caller.
+
+    With magnetotail=True, trace nightside T96 field lines using local
+    space-weather data (with the usual load_sw defaults for missing inputs).
+    Return them as a list of (N, 2) angular tracks in magnetotail_lines.
+    """
+    instant = Time(time)
+    if not instant.isscalar:
+        raise ValueError("time must be one UTC instant")
+    probe = str(prob).upper()
+    if probe not in {"A", "B"}:
+        raise ValueError("prob must be 'A' or 'B'")
+    if not isinstance(samples, (int, np.integer)) or samples < 3:
+        raise ValueError("samples must be an integer >= 3")
+    shells = np.atleast_1d(np.asarray(l_shells, dtype=float))
+    local_times = np.atleast_1d(np.asarray(mlt_hours, dtype=float))
+    if shells.ndim != 1 or not np.isfinite(shells).all() or np.any(shells <= 1):
+        raise ValueError("l_shells must be a one-dimensional sequence of finite values > 1")
+    if local_times.ndim != 1 or not np.isfinite(local_times).all() or np.any((local_times < 0) | (local_times >= 24)):
+        raise ValueError("mlt_hours must be a one-dimensional sequence in [0, 24)")
+
+    stamp = instant.datetime
+    observer = (load_pos("queqiao", stamp) + 1000 * epms.moon(stamp, geocentric=True)) / RE
+    attitude = load_rot("queqiao", stamp)
+    distance = np.linalg.norm(observer)
+    if not np.isfinite(distance) or distance <= 1 or not np.isfinite(attitude).all():
+        raise ValueError("projection requires valid attitude and a spacecraft position outside Earth")
+
+    def angular(points):
+        sight = gcd.transform_vectors(points - observer, source="ECI2000",
+                                      target=probe, attitude=attitude)
+        front = np.isfinite(sight).all(axis=1) & (sight[:, 2] < 0)
+        pixels = np.full((len(points), 2), np.nan)
+        if front.any():
+            pixels[front] = np.column_stack(vector_to_fov(sight[front], direction="look"))
+        return pixels
+
+    field_lines = []
+    curves = []
+    for shell in shells:
+        footpoint = np.arccos(1 / np.sqrt(shell))
+        latitude = np.linspace(-footpoint, footpoint, samples)
+        radius = shell * np.cos(latitude)**2
+        rho = radius * np.cos(latitude)
+        z = radius * np.sin(latitude)
+        for hour in local_times:
+            phi = (hour - 12) * np.pi / 12
+            curves.append(np.column_stack((rho * np.cos(phi), rho * np.sin(phi), z)))
+            field_lines.append({"l_shell": float(shell), "mlt_hours": float(hour)})
+    if curves:
+        points = gcd.transform_vectors(np.concatenate(curves), source="SM", target="ECI2000", times=stamp)
+        for line, pixels in zip(field_lines, angular(points).reshape(len(curves), samples, 2)):
+            line["px_py"] = pixels
+
+    magnetotail_lines = []
+    if magnetotail:
+        from libs.space import T96_fieldlines
+        from load import load_sw
+
+        weather = load_sw(stamp, download=False)
+        parameters = [float(np.asarray(weather[name]).item())
+                      for name in ("Pressure", "dst", "BY_GSM", "BZ_GSM")]
+        if not np.isfinite(parameters).all() or parameters[0] <= 0:
+            raise ValueError("T96 requires positive solar-wind pressure and finite Dst, By and Bz")
+        model = T96_fieldlines(stamp.tz_localize("UTC").timestamp(), *parameters, Nlat=11)
+        tail = [np.asarray(line).T for line in model.trace_lines_y0()]
+        if tail:
+            points = gcd.transform_vectors(np.concatenate(tail), source="GSM",
+                                          target="ECI2000", times=stamp)
+            magnetotail_lines = np.split(angular(points), np.cumsum([len(line) for line in tail])[:-1])
+
+    return {
+        "time_utc": stamp.tz_localize("UTC"),
+        "probe": probe,
+        "earth_distance_re": float(distance),
+        "earth_center": angular(np.zeros((1, 3)))[0],
+        "earth_limb": angular(_earth_limb(observer, distance, samples)),
+        "field_lines": field_lines,
+        "magnetotail_lines": magnetotail_lines,
+    }
+
 
 def moon_surface_points(
     center=(0.0, 0.0, 0.0),

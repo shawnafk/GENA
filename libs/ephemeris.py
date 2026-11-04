@@ -56,16 +56,19 @@ def Datetime_2_ISOT(dt):
 
 
 #given timestamp get moon localtion in J2000
-def moon(t):
+def moon(t, *, geocentric=False):
+    """Return Moon coordinates in km, relative to Earth if requested."""
     if np.isscalar(t) or isinstance(t, pd.Timestamp):
         t_iso = Datetime_2_ISOT(t)
-        t_jd = t_iso.jd
+        t_jd = t_iso.tdb.jd if geocentric else t_iso.jd
     else:
         #given any t, to datetime
         #take array or scalar
         t_iso = [Datetime_2_ISOT(_) for _ in t]
-        t_jd =  [_.jd for _ in t_iso]
+        t_jd = [time.tdb.jd if geocentric else time.jd for time in t_iso]
     moon_bary = kernel[3,301].compute(t_jd).transpose()
+    if geocentric:
+        return moon_bary - kernel[3,399].compute(t_jd).transpose()
     return moon_bary
 
 def sun(t):

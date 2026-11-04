@@ -270,9 +270,11 @@ def _read_omni(trange, *, variables, base, download, **kwargs):
         parts = {name: [] for name in variables}
         for month in pd.period_range(start.to_period("M"), end.to_period("M"), freq="M"):
             date = month.start_time
-            filename = directory / str(date.year) / f'omni_hro_1min_{date:%Y%m%d}_v01.cdf'
-            if not filename.exists():
-                logging.getLogger(__name__).warning("Missing OMNI file %s", filename)
+            pattern = f"omni_hro_1min_{date:%Y%m%d}_v[0-9][0-9].cdf"
+            candidates = (directory / str(date.year)).glob(pattern)
+            filename = max(candidates, default=None)
+            if filename is None:
+                logging.getLogger(__name__).warning("Missing OMNI file %s for %s", pattern, date.year)
                 continue
             with pycdf.CDF(str(filename)) as cdf:
                 times = Time(np.asarray(cdf["Epoch"])).datetime

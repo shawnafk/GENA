@@ -3,6 +3,7 @@ import pandas as pd
 
 from matplotlib import pyplot as plt
 from matplotlib.colors import LogNorm
+from matplotlib.lines import Line2D
 import matplotlib.ticker as ticker
 from scipy.interpolate import interp1d
 from scipy.stats import gaussian_kde
@@ -63,7 +64,13 @@ def layer(l2_df, layer=1, xyrange=None, f=None, ax=None, **kwargs):
 
 
 @tools.pass_axes()
-def fov(l2, xrange=None, yrange=None, fxy=(59.86, 19.5), sxy=(45.06, 9.85), f=None, ax=None, **kwargs):
+def fov(l2, xrange=None, yrange=None, fxy=(59.86, 19.5), sxy=(45.06, 9.85),
+        f=None, ax=None, *, projection=None, **kwargs):
+    """Plot the PX/PY histogram and optionally overlay instrument-frame geometry.
+
+    Pass the result of gena.post.project.get_instrument_projection as
+    projection. Its curves share the angular coordinates of the histogram.
+    """
     if xrange is None:
         xrange = np.arange(-35, 35, 2.5)
     if yrange is None:
@@ -71,6 +78,16 @@ def fov(l2, xrange=None, yrange=None, fxy=(59.86, 19.5), sxy=(45.06, 9.85), f=No
     h = ax.hist2d(l2['PX'], l2['PY'], [xrange, yrange], **kwargs)
     tools.draw_rectangle(ax, *fxy)
     tools.draw_rectangle(ax, *sxy)
+    if projection is not None:
+        # Reference curves do not participate in histogram autoscaling.
+        ax.add_artist(Line2D(*projection["earth_limb"].T, color="white",
+                             linewidth=1.2, label="Earth limb"))
+        for index, line in enumerate(projection["field_lines"]):
+            ax.add_artist(Line2D(*line["px_py"].T, color="gold", linewidth=0.8,
+                                 label="Dipole field lines" if index == 0 else "_nolegend_"))
+        for index, line in enumerate(projection.get("magnetotail_lines", ())):
+            ax.add_artist(Line2D(*line.T, color="cyan", linewidth=0.9, linestyle="--",
+                                 label="T96 magnetotail" if index == 0 else "_nolegend_"))
     ax.set_aspect('equal')
     f.colorbar(h[3], ax=ax)
     ax.set_xlabel('AX deg')

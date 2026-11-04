@@ -44,8 +44,8 @@ def _provenance(product):
 
 
 
-def load_gena(*, file=None, trange=None, product=None, columns=None):
-    """Load one complete GENA Parquet file or a product over a time range."""
+def load_gena(*, file=None, trange=None, product=None, columns=None, optional_columns=()):
+    """Load a GENA product, including any requested optional columns present on disk."""
     if (file is None) == (trange is None):
         raise ValueError("provide exactly one of file or trange")
     if file is not None and product is not None:
@@ -98,7 +98,11 @@ def load_gena(*, file=None, trange=None, product=None, columns=None):
                 raise KeyError(f"columns not found in Parquet data: {missing}")
         if schema_columns is None:
             schema_columns = current_columns
-        read_columns = columns if effective_product == "pdf" else None
+        read_columns = None
+        if effective_product == "pdf" and columns is not None:
+            read_columns = columns + [
+                name for name in optional_columns if name in current_columns and name not in columns
+            ]
         frames.append(
             pq.read_table(file_path, filters=filters, columns=read_columns).to_pandas()
         )
@@ -129,7 +133,7 @@ def load_gena(*, file=None, trange=None, product=None, columns=None):
         missing = [name for name in columns if name not in result.columns]
         if missing and schema_columns is not None:
             raise KeyError(f"columns not found in Parquet data: {missing}")
-        result = result.reindex(columns=columns)
+        result = result.reindex(columns=list(dict.fromkeys([*columns, *optional_columns])))
     result = result.reset_index(drop=True)
     result["Timestamp"] = pd.to_numeric(result["Timestamp"], errors="raise").astype(float)
     result["Datetime"] = pd.to_datetime(

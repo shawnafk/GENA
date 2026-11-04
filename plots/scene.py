@@ -67,6 +67,8 @@ class SceneSpec:
     max_frames: int = 24
     satellite_marker_size: float = 6.0
     quality: str = "quick"
+    field_line_cadence: str = "1h"
+    field_line_nlat: int = 21
 
     def __post_init__(self):
         if self.target_mode not in {*_TARGETS, "other", "unknown"}:
@@ -158,6 +160,8 @@ def prepare(spec: SceneSpec) -> SceneBundle:
         include_neutral_sheet=include_neutral_sheet,
         include_reference_planes=spec.include_reference_planes,
         satellite_marker_size=spec.satellite_marker_size,
+        field_line_cadence=spec.field_line_cadence,
+        field_line_nlat=spec.field_line_nlat,
     )
     return SceneBundle(context=context, spec=spec)
 
