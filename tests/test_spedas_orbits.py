@@ -36,7 +36,7 @@ class RegisteredOrbitTests(unittest.TestCase):
         self.addCleanup(offline.stop)
 
     def record(self):
-        return {"x": self.dates.asi8 / 1e9, "y": self.positions, "units": "km"}
+        return {"x": self.dates.as_unit("ns").asi8 / 1e9, "y": self.positions, "units": "km"}
 
     def test_mms_mec_registered_defaults_and_position_entry_are_identical(self):
         variable = "mms2_mec_r_gsm"
@@ -120,7 +120,7 @@ class RegisteredOrbitTests(unittest.TestCase):
         for product, selection, variable, target in cases:
             with self.subTest(product=product), patch(
                 f"pyspedas.projects.mms.{target}",
-                return_value={variable: {"x": self.dates.asi8 / 1e9, "y": np.arange(7, dtype=float)}},
+                return_value={variable: {"x": self.dates.as_unit("ns").asi8 / 1e9, "y": np.arange(7, dtype=float)}},
             ) as backend:
                 frame = load_data("mms", self.trange, product, key=selection, download=False, prefix=self.root)
                 self.assertEqual(backend.call_args.kwargs["varnames"], [variable])

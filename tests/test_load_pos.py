@@ -61,7 +61,7 @@ class PositionLoadingTests(unittest.TestCase):
     def test_gena_reads_position_and_particle_rows_without_interpolation(self):
         columns = ["MJ2000_Star_X", "MJ2000_Star_Y", "MJ2000_Star_Z"]
         source = pd.DataFrame(self.positions, columns=columns)
-        source["Timestamp"] = self.dates.asi8 / 1e9
+        source["Timestamp"] = self.dates.as_unit("ns").asi8 / 1e9
         with tempfile.TemporaryDirectory() as root:
             source.to_parquet(Path(root) / "20250310_pdf.pqt")
             particles = source.assign(
@@ -95,7 +95,7 @@ class PositionLoadingTests(unittest.TestCase):
         ]
         for mission, probe, variable, target in cases:
             with self.subTest(mission=mission), patch(target, return_value={
-                variable: {"x": self.dates.asi8 / 1e9, "y": self.positions},
+                variable: {"x": self.dates.as_unit("ns").asi8 / 1e9, "y": self.positions},
             }) as reader:
                 frame = load_pos(mission, self.trange, probe, download=False, prefix="/unused")
                 self.assertIsInstance(frame, TimeSeriesDataFrame)

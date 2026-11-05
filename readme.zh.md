@@ -2,6 +2,8 @@
 
 本项目用于处理和分析鹊桥二号中继星搭载的 **GENA**（Grid-based Energetic Neutral Atom，阵列式能量中性原子成像仪）数据，并与 THEMIS、MMS 的原位探测数据及 OMNI 太阳风数据开展联合分析。
 
+完整发行包、安装和版本说明见 [发行说明](RELEASE.md)。当前版本可通过 `gena.__version__` 查询。
+
 ---
 
 ## 项目架构

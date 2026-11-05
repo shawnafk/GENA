@@ -40,3 +40,9 @@ site/
 .codex-tmp/
 node_modules/
 *.swp
+
+# Release builds and isolated installations
+dist/
+build/
+*.egg-info/
+.venv/

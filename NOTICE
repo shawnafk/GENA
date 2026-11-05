@@ -1,0 +1,15 @@
+GENA-CODE release resources
+
+libs/de432s.bsp is the unmodified DE432s kernel distributed by NAIF/JPL.
+Source: https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de432s.bsp
+Kernel redistribution rules: https://naif.jpl.nasa.gov/naif/rules.html
+Credit: https://naif.jpl.nasa.gov/naif/credit.html
+
+libs/orbits_all.npz is a local snapshot derived from NASA/GSFC SSCWeb.
+Source: https://sscweb.gsfc.nasa.gov/WS/sscr/2
+See libs/orbits_all.meta.json for coordinate system, units, observatories,
+definitive/predictive sources and coverage. This snapshot ends in August 2026.
+The resource sizes and SHA256 fingerprints are recorded in release-resources.json.
+
+This notice records resource provenance and does not grant a license for the
+GENA-CODE source or for engineering/observation data.

@@ -1,0 +1,20 @@
+{
+  "libs/de432s.bsp": {
+    "source": "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de432s.bsp",
+    "description": "Unmodified NAIF/JPL DE432s planetary ephemeris",
+    "size": 10895360,
+    "sha256": "363f32e14f5255359ac32c4d38080cf28ab55564a5e16696a75f63394b666e9b"
+  },
+  "libs/orbits_all.npz": {
+    "source": "https://sscweb.gsfc.nasa.gov/WS/sscr/2",
+    "description": "Local SSCWeb orbit snapshot, GSE coordinates in Earth radii; see companion metadata",
+    "size": 96527156,
+    "sha256": "3ab038e5b4e5353e3b019319e66bc50c1c0377662a4d602530acd9f05583a8a0"
+  },
+  "libs/orbits_all.meta.json": {
+    "source": "https://sscweb.gsfc.nasa.gov/WS/sscr/2",
+    "description": "Orbit provenance and per-satellite coverage; snapshot updated 2026-08-27",
+    "size": 2489,
+    "sha256": "c7fdbc398f2cb1b0d04e110a887befdf96eaaf1b3206156cd2c665286cb18347"
+  }
+}

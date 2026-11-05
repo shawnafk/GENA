@@ -10,7 +10,7 @@ import pandas as pd
 from common.constants import RE
 from common.coord import coord as Coord, quaternion_array
 from gena.frame import ParticleDataFrame
-from gena.post.project import ray_from_L2
+from gena.post.project import events_rays
 from plots.tools import axes_for_columns as _axes_for_columns, column_groups as _column_groups
 
 __all__ = [
@@ -234,14 +234,14 @@ def velocity(
     direction_cols=("DX", "DY", "DZ"),
     velocity_cols=("VX", "VY", "VZ"),
 ) -> ParticleDataFrame:
-    """Add unit flight directions and km/s velocities using ray_from_L2.
+    """Add unit flight directions and km/s velocities using events_rays.
 
     Tof is in nanoseconds. Invalid attitude masks direction and velocity;
     non-positive or missing Tof masks velocity only. Row order and metadata
     are preserved; inplace=False returns a copy. vscale scales velocity only.
     """
     target = df if inplace else df.copy()
-    ray = np.empty((0, 3)) if target.empty else ray_from_L2(target, probe=probe, coord=coord)[coord]
+    ray = np.empty((0, 3)) if target.empty else events_rays(target, probe=probe, coord=coord)[coord]
     direction_unit = ray / np.linalg.norm(ray, axis=1)[:, None]
     tof = target["Tof"].to_numpy(dtype=float)
     factor = np.divide(1000., tof, out=np.full(len(target), np.nan), where=tof > 0)

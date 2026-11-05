@@ -11,7 +11,7 @@ from common.constants import RE
 from gena.frame import ParticleDataFrame, ParameterDataFrame
 from gena.utils import velocity
 from gena.post.project import (
-    event_axes, ray_from_L2, position_as_coord, projected_fov_axis_angle,
+    event_axes, events_rays, position_as_coord, projected_fov_axis_angle,
     plane_intersections, ray_sphere_intersections, obj_in_view,
     project_events, moon_blocking_mask, moon_blocking_intervals,
 )
@@ -21,7 +21,7 @@ class EventGeometryTests(unittest.TestCase):
     def setUp(self):
         dates = pd.date_range("2025-03-10", periods=4, freq="1s")
         self.events = ParticleDataFrame({
-            "Datetime": dates, "Timestamp": dates.asi8 / 1e9,
+            "Datetime": dates, "Timestamp": dates.as_unit("ns").asi8 / 1e9,
             "MJ2000_q1": [0., np.nan, 2., 0.],
             "MJ2000_q2": [0., 0., 0., 0.],
             "MJ2000_q3": [0., 0., 0., np.sin(np.pi / 4)],
@@ -58,7 +58,7 @@ class EventGeometryTests(unittest.TestCase):
         original = self.events.copy(deep=True)
         for probe in ("A", "B"):
             with self.subTest(probe=probe):
-                ray = ray_from_L2(self.events, probe=probe, coord="ECI2000")["ECI2000"]
+                ray = events_rays(self.events, probe=probe, coord="ECI2000")["ECI2000"]
                 vectors = velocity(self.events, probe=probe, coord="ECI2000")
                 direction = vectors[["DX", "DY", "DZ"]].to_numpy()
                 speeds = vectors[["VX", "VY", "VZ"]].to_numpy()

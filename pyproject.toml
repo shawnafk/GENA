@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gena-code"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Queqiao-2 GENA and coordinated space-physics analysis tools"
 requires-python = ">=3.12,<3.15"
 dependencies = [
@@ -25,3 +25,16 @@ dependencies = [
 [project.optional-dependencies]
 excel = ["openpyxl>=3.1,<4"]
 3d = ["geopack>=1.0,<2"]
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.dynamic]
+version = {attr = "gena._version.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["common", "common.*", "gena", "gena.*", "libs", "libs.*", "load", "load.*", "plots", "plots.*"]
+namespaces = true
+
+[tool.setuptools.package-data]
+libs = ["de432s.bsp", "orbits_all.npz", "orbits_all.meta.json"]

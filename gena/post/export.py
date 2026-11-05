@@ -25,7 +25,7 @@ from plots.scene import write_html as write_scene_html
 from gena.frame import ParameterDataFrame
 from load import load_data
 
-from .project import event_axes, ray_from_L2, position_as_coord
+from .project import event_axes, events_rays, position_as_coord
 
 __all__ = [
     "batch_plot",
@@ -379,7 +379,7 @@ def dump( l2df, prob="A", coord="GSM", *, pos_offset, extra_columns=("Energy",),
     locations = l2df.pos() / RE
     pos = position_as_coord(l2df["Datetime"], locations, pos_offset=pos_offset,
                             ref_coord="ECI2000", res_coord=coord)
-    ray_obj = ray_from_L2(l2df, probe=prob, coord=coord)
+    ray_obj = events_rays(l2df, probe=prob, coord=coord)
     ray = np.asarray(ray_obj[coord], dtype=float)
     if normalize_ray:
         norm = np.linalg.norm(ray, axis=1)

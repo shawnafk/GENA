@@ -106,7 +106,7 @@ class SolarWindLoadingTests(unittest.TestCase):
         with patch("load.facade.load_data", side_effect=[self.omni, self.dst]):
             weather = load_sw(self.trange, download=False)
         pose = ParameterDataFrame({
-            "Datetime": self.omni_dates, "Timestamp": self.omni_dates.asi8 / 1e9,
+            "Datetime": self.omni_dates, "Timestamp": self.omni_dates.as_unit("ns").asi8 / 1e9,
             "MJ2000_Star_X": 4e8, "MJ2000_Star_Y": 1e6, "MJ2000_Star_Z": 1e6,
             "MJ2000_q1": 0.1, "MJ2000_q2": 0.1, "MJ2000_q3": 0.1,
         })
