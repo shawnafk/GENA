@@ -9,11 +9,11 @@ import pandas as pd
 
 from common.constants import RE
 from common.coord import coord as Coord, quaternion_array
-from gena.frame import _row_rotations
+from gena.frame import ParticleDataFrame
+from gena.post.project import ray_from_L2
 from plots.tools import axes_for_columns as _axes_for_columns, column_groups as _column_groups
 
 __all__ = [
-    "get_velocity",
     "orbit",
     "pointing_geometry",
     "velocity",
@@ -98,7 +98,7 @@ def pointing_geometry(pdf, *, probe="A", coord="GSM", forward=True, attitude=Non
 
     dates = pose["Datetime"].to_list()
     if attitude is None:
-        rotation = _row_rotations(pose)
+        rotation = pose.rot()
     else:
         rotation = quaternion_array(attitude, count=len(pdf))
         if len(rotation) != 1:
@@ -224,19 +224,8 @@ def orbit(
     f.autofmt_xdate()
     return f, axes[0] if len(axes) == 1 else axes
 
-def get_velocity(df):
-    dx = df['X2'] - df['X1']
-    dy = df['Y2'] - df['Y1']
-    dz = 50
-    dt = df['Tof']
-    #mm to km, and ns to s
-    vx = (dx*1e-3*1e-3)/(dt*1e-9)
-    vy = (dy*1e-3*1e-3)/(dt*1e-9)
-    vz = (dz*1e-3*1e-3)/(dt*1e-9)
-    return np.column_stack([vx,vy,vz])
-
 def velocity(
-    df: pd.DataFrame,
+    df: ParticleDataFrame,
     *,
     coord="GSM",
     probe="A",
@@ -244,37 +233,19 @@ def velocity(
     inplace=False,
     direction_cols=("DX", "DY", "DZ"),
     velocity_cols=("VX", "VY", "VZ"),
-) -> pd.DataFrame:
-    """Calculate event look-direction and velocity columns in a target frame."""
-    target = df if inplace else df.copy()
-    required = ["X1", "Y1", "X2", "Y2", "Tof"]
-    for column in required:
-        if column not in target.columns:
-            raise KeyError(f"Missing required column {column!r}.")
-    dates = target["Datetime"].to_list()
-    rotation = _row_rotations(target)
-    ray_in_probe = np.column_stack(
-        (
-            target["X2"].to_numpy(dtype=float)
-            - target["X1"].to_numpy(dtype=float),
-            target["Y2"].to_numpy(dtype=float)
-            - target["Y1"].to_numpy(dtype=float),
-            np.full(len(target), 50.0),
-        )
-    )
-    ray = Coord(dates, ray_in_probe, probe, rotation)
-    ray.convert(coord)
-    direction = np.asarray(ray[coord], dtype=float)
-    direction_norm = np.linalg.norm(direction, axis=1)
-    valid_direction = direction_norm > 0
-    direction_unit = np.full_like(direction, np.nan, dtype=float)
-    direction_unit[valid_direction] = direction[valid_direction] / direction_norm[
-        valid_direction, np.newaxis
-    ]
+) -> ParticleDataFrame:
+    """Add unit flight directions and km/s velocities using ray_from_L2.
 
-    event_velocity = Coord(dates, get_velocity(target), probe, rotation)
-    event_velocity.convert(coord)
-    velocity_values = np.asarray(event_velocity[coord], dtype=float)
+    Tof is in nanoseconds. Invalid attitude masks direction and velocity;
+    non-positive or missing Tof masks velocity only. Row order and metadata
+    are preserved; inplace=False returns a copy. vscale scales velocity only.
+    """
+    target = df if inplace else df.copy()
+    ray = np.empty((0, 3)) if target.empty else ray_from_L2(target, probe=probe, coord=coord)[coord]
+    direction_unit = ray / np.linalg.norm(ray, axis=1)[:, None]
+    tof = target["Tof"].to_numpy(dtype=float)
+    factor = np.divide(1000., tof, out=np.full(len(target), np.nan), where=tof > 0)
+    velocity_values = ray * factor[:, None]
 
     scale = vscale(target) if callable(vscale) else vscale
     scale = np.asarray(scale, dtype=float)
@@ -289,6 +260,7 @@ def velocity(
 
     target.loc[:, list(direction_cols)] = direction_unit
     target.loc[:, list(velocity_cols)] = velocity_values
+    target.attrs.update(vector_coordinate=coord, probe=probe)
     return target
 
 

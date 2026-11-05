@@ -86,7 +86,7 @@ flowchart TD
 
 ```python
 # GENA ENA 数据
-from load import load
+from load import load_data
 from gena.frame import ParameterDataFrame, ParticleDataFrame
 from plots import gena as gena_vis
 from gena.post import statistic as gena_stat
@@ -115,33 +115,63 @@ from libs import ephemeris, plasma, space
 
 | 包 | 标准 API | 说明 |
 |----|----------|------|
-| `load` | `load("gena", file=...)` 或 `load("gena", trange=..., product=...)` | `file` 与 `trange` 互斥；`product` 是 Parquet 文件名后缀，例如 `pdf`、`l2_a` |
-| `load` | `load("themis", trange, product, variables=None, probe=..., download=False)`、`load("themis", trange, probe=...)` | 默认严格读取本地数据；支持 ESA ESD 三维分布；显式设置 `download=True` 或 `download="local_first"` 才允许联网 |
-| `load` | `load("mms", trange, product, variables=None, probe=...)`、`load("mms", trange, product, probe=...)` | `product` 为 `fpi` 或 `hpca` |
-| `load` | `load("omni", trange, product="hro", download=True, variables=None)` | 当前实现支持 OMNI HRO 1 分钟产品；`download=False` 时读取本地 CDF |
-| `load` | `load("indices", trange, product=None)` | `product` 选择 Kyoto AE/Dst/SYM/ASY 或 GFZ Kp/ap/日 Ap/SN/F10.7；省略时加载 AE/AL/AU；支持统一缓存和离线策略，详见 [indices API](load/api/indices.md) |
+| `load` | `load_data("gena", file=...)` 或 `load_data("gena", trange=..., product=...)` | `file` 与 `trange` 互斥；`product` 是 Parquet 文件名后缀，例如 `pdf`、`l2_a` |
+| `load` | `load_data("themis", trange, product, variables=None, probe=..., download=False)`、`load_data("themis", trange, probe=...)` | 默认严格读取本地数据；支持 ESA ESD 三维分布；显式设置 `download=True` 或 `download="local_first"` 才允许联网 |
+| `load` | `load_data("mms", trange, product, variables=None, probe=...)`、`load_data("mms", trange, product, probe=...)` | `product` 为 `fpi`、`hpca` 或轨道产品 `mec` |
+| `load` | `load_data("goes", trange, "orbit", probe="16", download=False)` | GOES 轨道，需明确卫星编号；复用 SPEDAS 时间裁剪和表格组装流程 |
+| `load` | `load_data("omni", trange, product="hro", download=True, variables=None)` | 当前实现支持 OMNI HRO 1 分钟产品；`download=False` 时读取本地 CDF |
+| `load` | `load_data("indices", trange, product=None)` | `product` 选择 Kyoto AE/Dst/SYM/ASY 或 GFZ Kp/ap/日 Ap/SN/F10.7；省略时加载 AE/AL/AU；支持统一缓存和离线策略，详见 [indices API](load/api/indices.md) |
 
 以上名称是标准公共入口。旧的任务专用加载函数不属于当前公共 API。
+
+通用入口命名为 `load_data`，用于区分 `load` 包、`facade.py` 模块和函数。原来的 `from load import load` 改为 `from load import load_data`，相应调用改为 `load_data(...)`；公共入口统一为 `load_data`、`load_pos`、`load_rot` 和 `load_sw`。
 
 GENA 使用同一个加载器提供两种互斥的输入模式：
 
 ```python
 # 按 UTC 时间范围发现每日文件
-pdf = load("gena", trange=["2024-12-03", "2024-12-04"], product="pdf")
+pdf = load_data("gena", trange=["2024-12-03", "2024-12-04"], product="pdf")
 
 # 读取一个完整文件
-pdf_file = load("gena", file="/data/20241203_pdf.pqt")
+pdf_file = load_data("gena", file="/data/20241203_pdf.pqt")
 ```
 
 所有加载器一次接受一个时间区间 `[start, end]`；需要多个区间时逐次调用。GENA 的 PDF 工参返回重新编号索引的 `ParameterDataFrame`，粒子产品返回 `ParticleDataFrame`；THEMIS、MMS、OMNI 和地磁指数加载器默认返回 `TimeSeriesDataFrame`，需要旧式逐变量 `x/y/v` 字典时可传入 `return_type="dict"`。
 
+`load_pos(mission, [start, end], id=...)` 同样读取闭区间内的全部原始位置采样，不插值、不扩展时间范围。所有任务统一返回 `TimeSeriesDataFrame`；GENA/鹊桥保留原始月心 MJ2000 位置列，单位为米。单个时刻或不是两个端点的列表会报错。需要插值时，先加载覆盖目标时刻的源数据区间，再显式调用：
+
+```python
+from load import load_pos
+
+pos = load_pos("themis", trange, id="b", coord="gsm", download=False)
+# 列为 Datetime、Timestamp、thb_pos_gsm_x/y/z，位置保留 CDF 原始单位。
+sampled_pos = pos.resample_at(times)
+
+qq_pos = load_pos("gena", trange)
+qq_sampled = qq_pos.resample_at(times)  # 所有任务使用同一个显式插值接口
+```
+
+MMS 的 `mec` 和 GOES 的 `orbit` 均已注册为 SPEDAS 产品，通用入口和位置入口共用读取、裁剪、组装流程：
+
+```python
+mms_pos = load_data("mms", trange, "mec", probe="1", key="r_gsm", download=False)
+goes_pos = load_data("goes", trange, "orbit", probe="16", key="XYZ_GSM", download=False)
+# 等价的位置便捷入口：
+mms_pos = load_pos("mms", trange, id="1", coord="gsm", download=False)
+goes_pos = load_pos("goes", trange, id="16", coord="gsm", download=False)
+```
+
+MMS MEC 默认使用 L2、`data_rate="srvy"`、`datatype="epht89q"`；GOES orbit 没有 `level` 参数。两者默认 `download="local_first"`，严格读取本地数据时传入 `download=False`。`prefix` 指定统一缓存根目录，数据分别放在 `mms_data/` 和 `goes_data/` 下。位置列保留后端变量前缀，如 `mms1_mec_r_gsm_x/y/z` 和 `g16_orbit_XYZ_GSM_x/y/z`。GOES 变量选择既接受 CDF 原名 `XYZ_GSM`，也接受完整变量名，由读取层转换后传给后端。读取保留原始采样和单位，不插值。
+
+普通 `load_data("gena", ...)` 读取 Parquet 原始行，不对粒子事件插值。`load_rot` 仍是按指定时刻计算姿态的辅助接口，会执行 SLERP；`load_sw(trange)` 将 OMNI 和 Dst 原始记录合并为 `TimeSeriesDataFrame`，不插值、不填入默认常数。
+
 THEMIS 默认严格使用本地数据，不会主动访问 Berkeley 远程索引：
 
 ```python
-esa = load("themis", trange, "esa", probe="b")                         # 仅本地读取
-esa = load("themis", trange, "esa", probe="b", download=True)          # 允许下载
-esa = load("themis", trange, "esa", probe="b", download="local_first") # 先检查本地，缺失时下载
-esd = load("themis", trange, "esd", probe="b", datatype="peif", download=True)  # ESA L2 三维离子分布
+esa = load_data("themis", trange, "esa", probe="b")                         # 仅本地读取
+esa = load_data("themis", trange, "esa", probe="b", download=True)          # 允许下载
+esa = load_data("themis", trange, "esa", probe="b", download="local_first") # 先检查本地，缺失时下载
+esd = load_data("themis", trange, "esd", probe="b", datatype="peif", download=True)  # ESA L2 三维离子分布
 ```
 
 ---
@@ -156,7 +186,7 @@ esd = load("themis", trange, "esd", probe="b", datatype="peif", download=True)  
 | GENA L1/L2 | 一个粒子探测事件 | Parquet 中以 Unix 秒表示的 `Timestamp` | `ParticleDataFrame` |
 | THEMIS/MMS/OMNI/indices | 某个观测时刻的变量值，不同变量可以具有不同采样率 | pySPEDAS 风格的 `x` 时间数组 | `TimeSeriesDataFrame` |
 
-`ParticleDataFrame` 继承 `TimeIndexedDataFrame`；逐事件位置和姿态保持普通列，不提供姿态插值方法。`ParameterDataFrame` 继承 `TimeSeriesDataFrame`，并为 PDF 工参增加 `pos_at()` 和 `rot_at()`。不同任务的能谱、坐标系、单位、标定和仪器响应仍由各任务模块解释。
+`ParticleDataFrame` 继承 `TimeIndexedDataFrame`；逐事件位置和姿态通过 `pos()` 和 `rot()` 提取，不插值。两种 GENA 表共用这些提取方法：`pos()` 返回月心 MJ2000 米位置数组 `(N, 3)`，`rot()` 返回 QQ→ECI2000 的 xyzw 四元数数组 `(N, 4)`，无效姿态行保留 NaN。`ParameterDataFrame` 继承 `TimeSeriesDataFrame`，并为 PDF 工参增加 `pos_at()` 和 `rot_at()`。不同任务的能谱、坐标系、单位、标定和仪器响应仍由各任务模块解释。
 
 ### 构造路径
 
@@ -164,7 +194,7 @@ esd = load("themis", trange, "esd", probe="b", datatype="peif", download=True)  
 
 ```mermaid
 flowchart LR
-    G["GENA Parquet 行<br/>Timestamp + 事件列"] --> GL["load(gena)"]
+    G["GENA Parquet 行<br/>Timestamp + 事件列"] --> GL["load_data(gena)"]
     GL --> E["ParameterDataFrame 或 ParticleDataFrame"]
     T["THEMIS/MMS/OMNI/指数变量<br/>x / y / 可选 v"] --> D["各产品 loader"]
     D --> F["TimeSeriesDataFrame"]
@@ -173,7 +203,7 @@ flowchart LR
     C --> S["共享行选择、时间区间切分、<br/>拼接和 tplot 入口"]
 ```
 
-GENA 加载路径是严格的：`load("gena", )` 拒绝缺少 `Timestamp` 的 Parquet 文件，执行与产品类型对应的排序和去重，直接用 pandas 生成 `Datetime`，再构造对应的产品类型。保留 `Datetime` 的 pandas 操作通过 `_constructor` 保留具体子类。
+GENA 加载路径是严格的：`load_data("gena", )` 拒绝缺少 `Timestamp` 的 Parquet 文件，执行与产品类型对应的排序和去重，直接用 pandas 生成 `Datetime`，再构造对应的产品类型。保留 `Datetime` 的 pandas 操作通过 `_constructor` 保留具体子类。
 
 THEMIS/MMS 在各自 loader 中声明变量布局，再交给私有 pySPEDAS 适配器处理。OMNI HRO 单独解释共享 `Epoch` 和标量字段；indices 使用各来源的读取逻辑；GENA Parquet 按已有表列处理。最终都生成普通的“列名 → 等长列数据”字典，再构造实例。
 
@@ -226,7 +256,7 @@ GENA 数据从原始遥测包逐级转换为科学产品：
 | `l2s_a`、`l2s_b` | Soft 质量筛选：执行标准通道检查，但不要求 X/Y TOF 一致性 |
 | `l2g_a`、`l2g_b` | Golden 质量筛选：执行包含 X/Y TOF 一致性的严格检查，并继续执行空间探测器窗口筛选 |
 
-传给 `load("gena", )` 的产品字符串就是文件名的准确后缀。例如，`load("gena", trange=trange, product="l2g_a")` 加载探针 A 的 golden L2，而不是标准 `l2_a`。
+传给 `load_data("gena", )` 的产品字符串就是文件名的准确后缀。例如，`load_data("gena", trange=trange, product="l2g_a")` 加载探针 A 的 golden L2，而不是标准 `l2_a`。
 
 ---
 
@@ -263,7 +293,7 @@ subset = l2.select(rule)
 
 仪器坐标系中的 FOV 几何单独定义：`va0` 和 `vb0` 是探针 A、B 的视轴，`va1`–`va4` 和 `vb1`–`vb4` 是四角方向，`fov_set_a` 和 `fov_set_b` 分别包含 11×19 个采样方向。新的通量函数不会自动应用这些 FOV 方向。
 
-粒子产品中的姿态列是每个事件捕获时记录的离散值，由投影代码直接读取。PDF 工参使用 `ParameterDataFrame.pos_at(times)` 对有效位置样本做线性插值，使用 `ParameterDataFrame.rot_at(times)` 按 SciPy `(x, y, z, w)` 四元数约定执行 SLERP；两个接口都拒绝超出 PDF 覆盖范围的请求。
+粒子产品中的姿态列是每个事件捕获时记录的离散值，由投影代码通过 `L2.rot()` 提取；`L2.pos()` 提取同行位置，两个方法均保留行顺序，不插值。PDF 工参使用 `ParameterDataFrame.pos_at(times)` 对有效位置样本做线性插值，使用 `ParameterDataFrame.rot_at(times)` 按 SciPy `(x, y, z, w)` 四元数约定执行 SLERP；两个接口都拒绝超出 PDF 覆盖范围的请求。
 
 ---
 
@@ -272,12 +302,12 @@ subset = l2.select(rule)
 GENA 派生统计量、通量和温度诊断主要位于 `gena.post.statistic`；射线和投影几何位于 `gena.post.project`。`counts_nd()` 负责事件直方图，`counts_to_flux()` 负责统一归一化，`flux_e()`、`flux_t()` 和 `flux_t_e()` 是三个薄封装。事件权重由调用方构造，并以与数据行位置对齐的一维数组传入。
 
 ```python
-from load import load
+from load import load_data
 from gena.post import statistic as gena_stat
 import numpy as np
 import pandas as pd
 
-l2 = load("gena", trange=trange, product="l2_a")
+l2 = load_data("gena", trange=trange, product="l2_a")
 energy_bins = np.geomspace(1.0, 100.0, 33)
 time_bins = pd.date_range(trange[0], trange[1], freq="5min")
 weights = np.ones(len(l2))  # 有标定结果时替换为逐事件权重
@@ -298,11 +328,13 @@ temperature, temperature_err, fitted_slope, slope_err, r_squared = gena_stat.flu
 投影示例：
 
 ```python
-from gena.post.project import get_projection
+from gena.post.project import project_events
 from gena.post.export import dump
-
-xyz = get_projection(l2, prob="A", coord="GSM")
-table = dump(l2, prob="A", coord="GSM")
+from libs import ephemeris
+from common.constants import RE
+pos_offset = ephemeris.moon(l2["Datetime"], geocentric=True) * 1000 / RE
+xyz = project_events(l2, pos_offset=pos_offset, probe="A", coord="GSM")
+table = dump(l2, pos_offset=pos_offset, prob="A", coord="GSM")
 ```
 
 ---
@@ -323,37 +355,40 @@ config = configure()
 trange = ["2024-11-12", "2024-11-13"]
 
 # GENA ENA 成像仪
-from load import load
+from load import load_data
 from gena.post import statistic as gena_stat
 
-pdf = load("gena", trange=trange, product="pdf")
-l2 = load("gena", trange=trange, product="l2_a")
+pdf = load_data("gena", trange=trange, product="pdf")
+l2 = load_data("gena", trange=trange, product="l2_a")
 
 # THEMIS 原位探测数据（ESA、FGM、MOM、EFI、SST）
-from load import load
+from load import load_data
 
-esa, fgm, mom, sst = tuple(load("themis", trange, product, probe="b") for product in ("esa", "fgm", "mom", "sst"))
+esa, fgm, mom, sst = tuple(load_data("themis", trange, product, probe="b") for product in ("esa", "fgm", "mom", "sst"))
 
 # MMS 原位探测数据（FPI、HPCA）
-from load import load
+from load import load_data
 
-fpi = load("mms", trange, "fpi", probe=1)
-hpca = load("mms", trange, "hpca", probe=1)
+fpi = load_data("mms", trange, "fpi", probe=1)
+hpca = load_data("mms", trange, "hpca", probe=1)
 
 # OMNI 太阳风和地磁指数
 from load import load_sw
 
-omni = load("omni", trange)
-auroral = load("indices", trange)          # 同时包含 AE、AL 和 AU
-dst = load("indices", trange, "dst")
-context = load("indices", trange, ["sym_h", "kp", "ap_daily", "f107"], download="local_first")
+omni = load_data("omni", trange)
+auroral = load_data("indices", trange)          # 同时包含 AE、AL 和 AU
+dst = load_data("indices", trange, "dst")
+context = load_data("indices", trange, ["sym_h", "kp", "ap_daily", "f107"], download="local_first")
 
-# 将太阳风和 Dst 环境参数插值到任意时刻
+# 按区间读取太阳风和 Dst 原始采样
 import pandas as pd
 
 t = pd.date_range("2024-11-12", "2024-11-13", freq="5min")
-environment = load_sw(t)
+environment = load_sw(trange)
+sampled_environment = environment.resample_at(t)  # 需要时显式插值
 ```
+
+`load_sw(trange, **kwargs)` 内部调用 `load_data("omni", trange, "hro", ...)` 和 `load_data("indices", trange, "dst", ...)`，向两者传递 `prefix`、`download` 等通用参数。返回列为 `Pressure`、`BY_GSM`、`BZ_GSM`、`Beta`、`Mgs_mach_num`、`SYM_H` 和 `dst`，时间轴取各变量原始时间戳的并集。缺测保留为 NaN，读取错误正常抛出，不扩展输入区间；旧的单时刻和 `trange_pad` 接口已移除。
 
 THEMIS、MMS、OMNI 和地磁指数加载器可能访问网络。代码审查和离线测试不应隐式触发下载，应使用现有本地数据、小型内存数据表或模拟加载边界。`gena.raw.decode.decode()` 会写入 Parquet 产品和日志，仅在明确执行原始数据转换任务时调用。
 
@@ -361,7 +396,7 @@ THEMIS、MMS、OMNI 和地磁指数加载器可能访问网络。代码审查和
 
 ## 新增卫星任务或数据源
 
-1. 在 `load/load.py` 中添加数据源 parser、明确的变量 layout、后端辅助函数和命名为 `load_<mission>()` 的加载器，再从 `load/__init__.py` 导出公开入口。
+1. 在 `load/facade.py` 中添加数据源 parser、明确的变量 layout、后端辅助函数和命名为 `load_<mission>()` 的加载器，再从 `load/__init__.py` 导出公开入口。
 2. parser 将源数据整理成 `assemble()` 所需的变量说明，命名加载器默认返回 `TimeSeriesDataFrame`；确有旧式字典调用需求时再提供 `return_type="dict"`。
 3. 在命名加载器中明确解释产品字段、时间轴、分量和附加轴；`assemble()` 只验证并组装这些变量说明，共享类型不处理存储格式。
 4. 在 `plots/<mission>.py` 中实现任务专用绘图，并复用 `plots.tools` 的坐标轴和通用时序绘图基础设施。
@@ -374,7 +409,7 @@ THEMIS、MMS、OMNI 和地磁指数加载器可能访问网络。代码审查和
 ## 重要说明
 
 - 仓库仍在持续开发，调用函数前应以当前源码签名为准，README 和历史分析脚本可能滞后。
-- `gena.post.project.get_spacecraft_pos(l2df, coord)` 直接转换 L2 粒子行中已经存在的位置；需要按任意时刻读取工程位置或姿态时，先加载 PDF，再调用 `ParameterDataFrame.pos_at()` 或 `rot_at()`。
+- `gena.post.project.position_as_coord(dates, locations, ...)` 接收 R_E 位置数组，可通过 `pos_offset` 添加同一源坐标系中的位置偏移，不读取星历；L2 投影和导出需显式传入预先准备的地心月球位置偏移；需要按任意时刻读取工程位置或姿态时，先加载 PDF，再调用 `ParameterDataFrame.pos_at()` 或 `rot_at()`。
 - 探针标识必须在过滤、数据转换、标定、投影和绘图过程中保持一致，并遵循各函数记录的大小写约定。
 - 标准产品使用 `l2_a/l2_b`，soft 质量产品使用 `l2s_a/l2s_b`，只有需要严格通道检查和空间筛选时才使用 `l2g_a/l2g_b`。
 - `deprecated/`、`TODO/` 和论文专用脚本属于历史或具体研究上下文，不是规范公共 API 的来源。

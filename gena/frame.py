@@ -12,30 +12,23 @@ from common.interp import i_pos, i_rot
 __all__ = ["ParticleDataFrame", "ParameterDataFrame"]
 
 
-_ROTATION_COLUMNS = ["MJ2000_q1", "MJ2000_q2", "MJ2000_q3"]
+class _PoseAccessors:
+    """Extract stored position and attitude from GENA tables without interpolation."""
 
+    def pos(self):
+        """Return row-aligned Moon-relative MJ2000 positions, (N, 3), in metres."""
+        return self[["MJ2000_Star_X", "MJ2000_Star_Y", "MJ2000_Star_Z"]].to_numpy(dtype=float, copy=True)
 
-def _row_quaternions(frame):
-    """Reconstruct row-aligned xyzw quaternions, leaving invalid rows as NaN."""
-    missing = [name for name in _ROTATION_COLUMNS if name not in frame.columns]
-    if missing:
-        raise KeyError(f"rotation columns are missing: {missing}")
-    vector = frame[_ROTATION_COLUMNS].to_numpy(dtype=float)
-    squared = np.sum(vector**2, axis=1)
-    # Match the raw conversion tolerance for stored float32 attitude components.
-    valid = np.isfinite(squared) & (squared <= 1.0 + 1e-6)
-    scalar = np.sqrt(np.clip(1.0 - squared, 0.0, 1.0))
-    quaternion = np.column_stack([vector, scalar])
-    quaternion[~valid] = np.nan
-    return quaternion
-
-
-def _row_rotations(frame):
-    """Build rotations for a frame with valid stored attitude in every row."""
-    quaternion = _row_quaternions(frame)
-    if not np.isfinite(quaternion).all():
-        raise ValueError("rotation rows must contain finite quaternion vector components with norm <= 1")
-    return Rotation.from_quat(quaternion)
+    def rot(self):
+        """Return row-aligned QQ→ECI2000 xyzw quaternions, (N, 4); invalid rows are NaN."""
+        vector = self[["MJ2000_q1", "MJ2000_q2", "MJ2000_q3"]].to_numpy(dtype=float)
+        squared = np.sum(vector**2, axis=1)
+        # Allow float32 rounding at unit norm, as in raw attitude conversion.
+        valid = np.isfinite(squared) & (squared <= 1.0 + 1e-6)
+        scalar = np.sqrt(np.clip(1.0 - squared, 0.0, 1.0))
+        quaternion = np.column_stack([vector, scalar])
+        quaternion[~valid] = np.nan
+        return quaternion
 
 
 def _evaluation_timestamps(times):
@@ -47,8 +40,8 @@ def _evaluation_timestamps(times):
     return values
 
 
-class ParticleDataFrame(TimeIndexedDataFrame):
-    """GENA particle events whose position and attitude remain ordinary columns."""
+class ParticleDataFrame(_PoseAccessors, TimeIndexedDataFrame):
+    """GENA particle events with row-aligned position and attitude extraction."""
 
     def window_ave(self, key, window="5min", **kwargs):
         """Delegate time-windowed averages to :mod:`gena.post.statistic`."""
@@ -79,7 +72,7 @@ class ParticleDataFrame(TimeIndexedDataFrame):
         )
 
 
-class ParameterDataFrame(TimeSeriesDataFrame):
+class ParameterDataFrame(_PoseAccessors, TimeSeriesDataFrame):
     """GENA PDF engineering parameters with position and attitude interpolation."""
 
     def _loc_from_pdf(self, gap=1):

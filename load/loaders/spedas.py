@@ -2,7 +2,7 @@
 
 import logging
 
-from load.api.spedas import default_level, parse_spedas, read_spedas
+from load.api.spedas import SPEDAS_OPTIONS, default_level, normalize_probe, parse_spedas, read_spedas
 from load.api.variable import _clip_variable_dict, assemble
 from common.time import Time
 
@@ -22,10 +22,13 @@ def load_spedas(
     if return_type not in {"dataframe", "dict"}:
         raise ValueError("return_type must be 'dataframe' or 'dict'")
     mission = str(mission).lower()
-    if mission not in {"themis", "mms", "omni"}:
-        raise ValueError("mission must be 'themis', 'mms', or 'omni'")
-    if product is None and mission == "omni":
-        product = "hro"
+    if mission not in SPEDAS_OPTIONS:
+        raise ValueError(f"mission must be one of {', '.join(SPEDAS_OPTIONS)}")
+    products = SPEDAS_OPTIONS[mission]["products"]
+    if product is None and len(products) == 1:
+        product = products[0]
+    if product is not None:
+        product = str(product).lower()
     if mission == "omni" and product != "hro":
         raise ValueError("OMNI loader currently supports product='hro' only.")
     level = default_level(mission, product) if level is None else level
@@ -35,7 +38,7 @@ def load_spedas(
         datatype = kwargs.setdefault("datatype", "peif")
         if not isinstance(datatype, str) or not datatype:
             raise ValueError("THEMIS ESD datatype must be a non-empty string")
-    probe = ("a" if mission == "themis" else 1) if probe is None and mission != "omni" else probe
+    probe = normalize_probe(mission, probe)
 
     interval = Time(trange).datetime
     dates = [value.isoformat() for value in interval]

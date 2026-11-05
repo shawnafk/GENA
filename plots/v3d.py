@@ -11,15 +11,14 @@ import pandas as pd
 from plotly import graph_objects as go
 import numpy as np
 from scipy.interpolate import interp1d
-from scipy.spatial.transform import Slerp
+from scipy.spatial.transform import Rotation, Slerp
 
 from common.time import Time
 from common.config import get_configured_paths, resolve_output_path
 from common.constants import RE
 from common.coord import coord
 from gena.constants import va1, va2, va3, va4, vb1, vb2, vb3, vb4
-from gena.frame import _row_rotations
-from load import load, load_sw
+from load import load_data, load_sw
 from libs import ephemeris as epms
 from libs.space import Bowshock, Magnetopause, T96NeutralSheet, T96_fieldlines
 
@@ -964,7 +963,7 @@ class SceneContext:
         ]
         rotation_columns = ['MJ2000_q1', 'MJ2000_q2', 'MJ2000_q3']
         pose_columns = ['Timestamp', *position_columns, *rotation_columns]
-        pose = load("gena", 
+        pose = load_data("gena",
             trange=trange,
             product="pdf",
             columns=pose_columns,
@@ -979,8 +978,8 @@ class SceneContext:
             raise ValueError('fewer than two valid position/attitude samples')
 
         pose_timestamps = pose['Timestamp'].to_numpy(dtype=float)
-        pose_positions = pose[position_columns].to_numpy(dtype=float)
-        pose_rotations = _row_rotations(pose)
+        pose_positions = pose.pos()
+        pose_rotations = Rotation.from_quat(pose.rot())
         cache_start = pd.to_datetime(pose_timestamps[0], unit='s', utc=True)
         cache_stop = pd.to_datetime(pose_timestamps[-1], unit='s', utc=True)
         cadence = pd.Timedelta(cache_cadence)
@@ -1081,7 +1080,10 @@ class SceneContext:
             space_weather = provided
             space_weather_source = "provided"
         elif use_space_weather:
-            raw_weather = load_sw(cache_timestamps, download=False)
+            weather_pad = pd.Timedelta('1h')
+            raw_weather = load_sw(
+                [cache_start - weather_pad, cache_stop + weather_pad], download=False,
+            ).resample_at(cache_dates)
             space_weather = {
                 name: np.asarray(raw_weather.get(name, []), dtype=float)
                 for name in (

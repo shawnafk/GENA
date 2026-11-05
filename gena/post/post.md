@@ -81,18 +81,74 @@ Thus the relative efficiency and weight are both 1 at 10 keV. The external weigh
 
 ### `project.py`
 
-- `project`: ray-plane intersection.
-- `verify_point`: verify nominal pointing against projected coordinates.
-- `get_spacecraft_pos`: convert positions already present in an L2 DataFrame to the requested coordinate. PDF engineering data instead uses `ParameterDataFrame.pos_at(times)` and `ParameterDataFrame.rot_at(times)`.
-- `get_ray`: convert event ray vectors to the requested output coordinate.
-- `get_frame`: convert instrument frame axes to the requested output coordinate.
-- `get_projection`: project event rays onto a plane.
+本模块按“基础数组几何 → 事件几何 → 目标定义 → 通用视场投影 → 月球遮挡”排列。目标定义与观察者分离，不加载工程数据、太阳风或星历，不自动插值，不保留旧接口兼容包装。
+
+| 分区 | 公开函数 | 输入与结果 |
+| --- | --- | --- |
+| 基础数组几何 | `plane_intersections`、`ray_sphere_intersections`、`sphere_limb`、`axial_mean_angle` | 数组求交、球体精确切线轮廓及轴方向平均 |
+| 位置转换 | `position_as_coord` | 位置数组加可选偏移后转换坐标系，返回坐标对象 |
+| 事件几何 | `ray_from_L2`、`event_axes` | 逐行读取姿态，返回射线或三根坐标轴的坐标对象 |
+| 事件投影 | `project_events`、`projected_fov_axis_angle` | 返回交点数组，或每行角度及平均角度 |
+| 目标定义 | `dipole_fieldlines` | 生成命名的 SM/R_E 参考偶极磁力线，不依赖观察者或姿态 |
+| 通用视场 | `obj_in_view` | 输入观察者、姿态、目标字典，返回各目标的角度、视场掩码、裁剪线段和可见性标记 |
+| 月球遮挡 | `moon_blocking_mask`、`moon_blocking_intervals` | 从 GENA 表提取同行位置和姿态，定义月球球体并复用 `obj_in_view` |
+
+空间位置使用 R_E；GENA 表的 `pos()` 返回月心 MJ2000 米位置，进入位置转换或视场函数前除以 `RE`。`rot()` 返回逐行 QQ→ECI2000 的 xyzw 数组，无效姿态保留 NaN。`position_as_coord` 先添加与位置使用相同源坐标系和单位的 `pos_offset`，再从 `ref_coord` 转到 `res_coord`。L2 的 `project_events`、`projected_fov_axis_angle` 和导出 `dump` 需显式传入地心 ECI2000 月球位置偏移。`gena.utils.velocity` 复用 `ray_from_L2`，生成单位粒子飞行方向和 km/s 速度；飞行方向为层 1 → 层 2，仪器观测方向为探头 -Z。
+
+`obj_in_view(time, position, attitude, objects, ...)` 每次处理一个 UTC 时刻和观察者位置。`position` 使用 `ref_coord`（默认 ECI2000）；各目标可指定自己的 `coord`，但所有目标与观察者必须共用原点和 R_E 单位。视场朝 `probe` 的 -Z，`ax_deg`、`ay_deg` 为矩形半视角，默认 22.5°、10°。目标名称没有特殊含义，地球、月球或其他球体都使用同一种定义。
+
+| `kind` | 几何字段 | 用途 |
+| --- | --- | --- |
+| `sphere` | `center` 三维位置、`radius` | 地球、月球等球体；投影时根据观察者计算切线轮廓 |
+| `curve` | `points` 为 `(N, 3)` 数组 | 磁力线、磁尾边界、轨迹、预先准备的 limb 曲线 |
+| `points` | `points` 为 `(N, 3)` 数组或一个 `(3,)` 位置 | 卫星或其他离散目标 |
+
+返回字典保留目标名称和元数据。`px_py` 为前半球的角度，后方或无效点为 NaN；`in_view` 为逐点视场掩码，`visible_px_py` 额外将视场外点置为 NaN。曲线和球体轮廓的 `segments_px_py` 为 `(M, 2, 2)` 裁剪线段，两端都在视场外但穿过视场的线段也会保留。`any_in_view` 表示目标与视场相交，`all_in_view` 表示整个目标在视场内；球体另有 `center_px_py` 和 `covers_view`（球体视盘覆盖整个视场）。球体的这三个布尔判定使用解析几何，`samples` 只控制轮廓绘图精度；其他目标按给定点或折线处理。各目标独立投影，不计算目标之间的遮挡。
+
+```python
+from load import load_data
+from libs import ephemeris
+from common.constants import RE, RM
+from common.time import Time
+from gena.post.project import project_events, dipole_fieldlines, obj_in_view
+from gena.utils import velocity
+import pandas as pd
+
+# 逐事件计算：加载与月球星历准备放在调用端。
+events = load_data("gena", trange, "l2_a")
+vectors = velocity(events, probe="A", coord="GSM")
+pos_offset = ephemeris.moon(events["Datetime"], geocentric=True) * 1000 / RE
+xyz = project_events(events, pos_offset=pos_offset, probe="A", coord="GSM",
+                     plane_normal=(1, 0, 0), plane_point=(-65, 0, 0))
+
+# 定义目标：与观察者姿态和视场无关。
+stamp = Time(time).datetime
+moon_position = ephemeris.moon(stamp, geocentric=True) * 1000 / RE
+objects = {
+    "earth": {"kind": "sphere", "center": (0, 0, 0), "radius": 1., "coord": "ECI2000"},
+    "moon": {"kind": "sphere", "center": moon_position, "radius": RM / RE, "coord": "ECI2000"},
+    **dipole_fieldlines(l_shells=(4, 8)),
+}
+
+# 准备观察者，再把同一组目标交给通用视场函数。
+pad = pd.Timedelta("1h")
+pose = load_data("gena", [stamp - pad, stamp + pad], "pdf")
+position = pose.pos_at([stamp])[0] / RE + moon_position
+attitude = pose.rot_at([stamp])
+image = obj_in_view(stamp, position, attitude, objects, probe="A")
+```
+
+磁尾模型在调用端通过 `load_sw` 和 `libs.space.T96_fieldlines` 生成，然后将每条 GSM/R_E 曲线定义为 `{"kind": "curve", "points": line, "coord": "GSM"}` 加入 `objects`。卫星当前位置使用 `{"kind": "points", "points": positions, "coord": "GSE"}`，位置应提前加载并对齐到观测时刻。`plots.gena.fov(events, projection=image)` 可直接绘制这些通用结果；目标的可选 `style` 字典设置颜色、线宽和图例文字。
+
+月球遮挡使用月心位置，因此月球目标中心为原点，不需要读取月球星历。先联合筛选有效位置和姿态，再按 `gap` 抽样；返回的 `partial_block` 表示月球视盘与视场相交，`full_block` 表示整个月球视盘位于视场内，`covers_view` 才表示月球覆盖整个视场。`moon_blocking_intervals(full_disk=True)` 按 `full_block` 分组，默认按 `partial_block` 分组。
+
+旧的 `instrument_projection` 已移除，目标定义与 `obj_in_view` 直接替代其功能，不保留别名。
 
 ### Historical `ena_drift.py` (not present)
 
 二维特定能段漂移拟合的完整物理推导、调用示例和结果解释见 [`ena_drift.md`](ena_drift.md)。
 
-- `ena_velocity_unit_vectors_gsm`: returns the physical layer-1-to-layer-2 ENA particle-flight direction in GSM, using the same convention as `get_ray` and `gena.utils.velocity`.
+- `ena_velocity_unit_vectors_gsm`: returns the physical layer-1-to-layer-2 ENA particle-flight direction in GSM, using the same convention as `ray_from_L2` and `gena.utils.velocity`.
 - `gsm_angles_from_unit_vectors`: converts physical ENA velocity directions to GSM longitude and latitude.
 - `bin_two_band_gsm_counts`: makes raw `(band, longitude, latitude)` counts from two non-overlapping energy bands. Longitude is unwrapped from the first supplied edge, so a grid may cross -180/180 degrees.
 - `vb_from_ena_2d`: fits one speed along a supplied GSM direction from the conditional two-band angular-count likelihood, with `eff_H(E)` and `sigma_HH(E)` folded into the forward model.

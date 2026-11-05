@@ -184,7 +184,7 @@ spec = SceneSpec(
     target_mode="mid_tail",      # earth / mid_tail / far_tail / other
     quality="quick",
     max_frames=24,
-    # 可选：显式传入 OMNI 数组，避免 load_sw 的默认值兜底
+    # 可选：显式传入 OMNI 数组，直接指定场景模型所用参数
     # space_weather={"BZ_GSM": ..., "BY_GSM": ..., ...},
 )
 bundle = prepare(spec)

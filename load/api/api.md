@@ -2,9 +2,9 @@
 
 This package is the source access boundary for the loading system. It reads remote or cached source products and returns source-native records together with explicit product layouts. DataFrame construction belongs to the loader layer.
 
-`spedas.py` contains the common pySPEDAS access wrapper and `parse_spedas()`. `read_spedas()` exposes one public read signature while keeping the THEMIS, MMS, and OMNI backend call differences private. `read_spedas()` returns `(data, layouts)`, with each mission reader generating its layouts directly from the product information already available while reading. The public wrapper validates options, dispatches to the selected reader, and applies optional `variable_layouts` overrides. MMS data retain their complete backend variable names here; the shared loader preserves these complete names too. Callers pass the returned layouts to `parse_spedas()` without generating them again. The data records use the pySPEDAS fields `x`, `y`, and optional `v`, `v1`, `v2`, or `v3`.
+`spedas.py` contains the common pySPEDAS access wrapper and `parse_spedas()`. `read_spedas()` exposes one public read signature while keeping the THEMIS, MMS, GOES, and OMNI backend call differences private. `read_spedas()` returns `(data, layouts)`, with each mission reader generating its layouts directly from the product information already available while reading. The public wrapper validates options, dispatches to the selected reader, and applies optional `variable_layouts` overrides. MMS data retain their complete backend variable names here; the shared loader preserves these complete names too. Callers pass the returned layouts to `parse_spedas()` without generating them again. The data records use the pySPEDAS fields `x`, `y`, and optional `v`, `v1`, `v2`, or `v3`.
 
-`indices.py` provides Kyoto/GFZ source access and scalar parsing through `read_indices()` and `parse_indices()`; see [indices API details](indices.md). Product rules, vector declarations, and energy-axis names live in `load.api.spedas`. `OMNI_FIELDS` declares the HRO scalar layout and default variable list alongside `THEMIS_FIELDS` and `MMS_FIELDS`. Each mission reader applies its own rules before returning `(data, layouts)`. A private helper handles only common array representations and auxiliary axes; there is no separate mission-dispatching layout generator. DataFrame construction belongs in `load.loaders`. OMNI local CDF access is handled by its API reader, which returns the same records and layouts as remote access.
+`indices.py` provides Kyoto/GFZ source access and scalar parsing through `read_indices()` and `parse_indices()`; see [indices API details](indices.md). Product rules, vector declarations, and energy-axis names live in `load.api.spedas`. `OMNI_FIELDS` declares the HRO scalar layout and default variable list alongside `THEMIS_FIELDS`, `MMS_FIELDS`, and `GOES_FIELDS`. MMS MEC and GOES orbit have registered vector layouts and default position selections. Each mission reader applies its own rules before returning `(data, layouts)`. A private helper handles only common array representations and auxiliary axes; there is no separate mission-dispatching layout generator. DataFrame construction belongs in `load.loaders`. OMNI local CDF access is handled by its API reader, which returns the same records and layouts as remote access.
 
 """Parse observation sources data, assemble time-series frames, and expose loaders.
 
@@ -48,19 +48,21 @@ Each variable description passed to :func:`assemble` is stored as ``name -> desc
 GENA Parquet products are the exception to the parser/assembler path. Particle products contain independent event rows and parameter products already have a table layout, so :func:`load_gena` constructs their specialized frame classes directly.
 """
 
-THEMIS, MMS, and OMNI use the shared internal pipeline in `load.loaders.spedas.load_spedas()`. The `load` package exports only `load`, `load_pos`, and `load_sw`; the mission readers, `read_*`, `parse_*`, and `assemble` described here are internal module functions. The public entry for these missions is `load(mission, ...)`; `load_spedas()` and mission-specific alignment helpers remain internal. GENA and indices retain separate source loaders.
+THEMIS, MMS, GOES, and OMNI use the shared internal pipeline in `load.loaders.spedas.load_spedas()`. The `load` package exports only `load_data`, `load_pos`, `load_rot`, and `load_sw`; the mission readers, `read_*`, `parse_*`, and `assemble` described here are internal module functions. The public entry for these missions is `load_data(mission, ...)`; `load_spedas()` and mission-specific alignment helpers remain internal. GENA and indices retain separate source loaders.
 
 The internal loading entrypoint is `load_spedas(mission, trange, product, ...)`. Mission-specific public wrappers and intermediate product-loading functions have been removed. All missions use `read_spedas()` followed by clipping, `parse_spedas()`, and `assemble()`. Dictionary output retains backend variable names and native axes. Default download policies are configured in `SPEDAS_OPTIONS` and resolved by the read API.
+
+MMS MEC orbit and GOES orbit use this same pipeline. MMS default fields are qualified as `mmsN_mec_r_gsm`; its reader dispatches to `mms_load_mec` with default `level="l2"`, `data_rate="srvy"`, and `datatype="epht89q"`. GOES orbit requires a positive spacecraft number and has no level; its default field is `gN_orbit_XYZ_GSM`. The GOES reader strips `gN_orbit_` from selections before passing `varnames` to `load_orbit`, then retains full returned names and declares the coordinate arrays as vectors. Both missions configure their cache under `prefix/mms_data` or `prefix/goes_data`, preserve native records, and share clipping, dictionary output, and DataFrame assembly with the other SPEDAS products. `load_pos` contains no direct pySPEDAS backend calls.
 
 The indices path mirrors SPEDAS: `read_indices(trange, product, ...)` returns records and layouts, `parse_indices(data, layouts)` produces structured variables, and `load.loaders.indices.load_indices()` handles one normalized interval, assembly, and output selection. `INDICES_FIELDS` declares Kyoto AE/Dst/SYM/ASY and GFZ Kp/ap/Ap/SN/F10.7 fields. All products share offline/local-first/refresh policies and monthly JSON caching.
 
 
 # Indices API and loader
 
-The indices path follows the same layers as SPEDAS: `read_indices()` returns `(data, layouts)`, `parse_indices(data, layouts)` returns structured variables, and `load("indices", ...)` handles assembly and the requested return type. Field definitions, URLs, network access, cache handling, fill values, units, and source metadata belong to `load/api/indices.py`; the loader does not implement source-specific downloads or parsers.
+The indices path follows the same layers as SPEDAS: `read_indices()` returns `(data, layouts)`, `parse_indices(data, layouts)` returns structured variables, and `load_data("indices", ...)` handles assembly and the requested return type. Field definitions, URLs, network access, cache handling, fill values, units, and source metadata belong to `load/api/indices.py`; the loader does not implement source-specific downloads or parsers.
 
 ```python
-from load import load
+from load import load_data
 from load.api.indices import parse_indices, read_indices
 from load.api.variable import assemble
 
@@ -70,7 +72,7 @@ variables = parse_indices(data, layouts)
 frame = assemble(variables, source="indices")
 
 # The complete public loading path.
-frame = load("indices", trange, ["ae", "al", "au", "dst", "kp", "f107"])
+frame = load_data("indices", trange, ["ae", "al", "au", "dst", "kp", "f107"])
 ```
 
 ## Fields
@@ -106,8 +108,8 @@ Kyoto's best-available datasets select the highest available processing level fo
 The default is `"local_first"`. Existing monthly files are snapshots, including the current month; use `"refresh"` when new samples or processing revisions are needed. Failed requests do not erase existing cache files. This JSON cache replaces the previous ad hoc Kyoto text/GFZ-table cache; `prefix` replaces the old `save_folder` option. The old `dst2` fallback name is removed: the Kyoto `dst` best-available dataset already selects the available processing version.
 
 ```python
-cached = load("indices", trange, "dst", prefix="/data/space-weather", download=False)
-updated = load("indices", trange, "dst", prefix="/data/space-weather", download="refresh")
+cached = load_data("indices", trange, "dst", prefix="/data/space-weather", download=False)
+updated = load_data("indices", trange, "dst", prefix="/data/space-weather", download="refresh")
 ```
 
 Default output is `TimeSeriesDataFrame`. With `return_type="dict"`, a single selected product returns its `x`/`y` record, including units and source attributes; multiple products return a name-to-record mapping. Native times, units, source field names, citation identifiers, timestamp conventions, and month-specific processing metadata are retained in the structured variable attributes and resulting frame metadata.

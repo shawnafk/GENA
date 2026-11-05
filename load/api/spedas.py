@@ -72,6 +72,18 @@ MMS_FIELDS = {
         "vectors": {*(f"{s}_ion_bulk_velocity{suffix}" for s in ("hplus", "heplus", "heplusplus", "oplus") for suffix in ("", "_GSM")), "B_GSE_spin_avg", "B_GSM_spin_avg"},
         "energy": set(), "stem": "hpca",
     },
+    "mec": {
+        "default": lambda p: ["r_gsm"],
+        "vectors": {f"r_{coord}" for coord in ("gsm", "gse", "sm", "geo", "gei", "dsc", "dbcs")},
+        "energy": set(), "stem": "mec",
+    },
+}
+
+GOES_FIELDS = {
+    "orbit": {
+        "default": lambda p: ["XYZ_GSM"],
+        "vectors": {f"XYZ_{coord}" for coord in ("GSM", "GSE", "SM", "GEO")},
+    },
 }
 
 OMNI_FIELDS = {
@@ -95,6 +107,12 @@ SPEDAS_OPTIONS = {
         "default_probe": "1",
         "download": "local_first",
     },
+    "goes": {
+        "products": list(GOES_FIELDS),
+        "probes": None,  # positive spacecraft number; supplied explicitly
+        "default_probe": None,
+        "download": "local_first",
+    },
     "omni": {
         "products": list(OMNI_FIELDS),
         "probes": [],
@@ -104,21 +122,38 @@ SPEDAS_OPTIONS = {
 }
 
 #: Products that do not live at the mission's usual L2 level.
-DEFAULT_LEVELS = {"themis": {"state": "l1"}}
+DEFAULT_LEVELS = {"themis": {"state": "l1"}, "goes": {"orbit": None}}
 
 
 def default_level(mission, product):
-    """Return the level a product is normally delivered at (default ``l2``)."""
+    """Return the usual level (default l2), or None for unlevelled GOES orbit."""
     return DEFAULT_LEVELS.get(str(mission).lower(), {}).get(str(product).lower(), "l2")
 
 
 def default_variables(mission, product, probe):
-    table = {"themis": THEMIS_FIELDS, "mms": MMS_FIELDS, "omni": OMNI_FIELDS}[mission]
+    table = {"themis": THEMIS_FIELDS, "mms": MMS_FIELDS, "goes": GOES_FIELDS, "omni": OMNI_FIELDS}[mission]
     try:
         defaults = table[product]["default"]
         return defaults(probe) if callable(defaults) else list(defaults)
     except KeyError as exc:
         raise ValueError(f"unsupported {mission} product {product!r}") from exc
+
+
+def normalize_probe(mission, probe):
+    """Resolve and validate one probe using the registered mission rules."""
+    options = SPEDAS_OPTIONS[mission]
+    probe = options["default_probe"] if probe is None else str(probe).lower()
+    if mission == "goes":
+        if probe is None or not probe.isdecimal() or int(probe) < 1:
+            raise ValueError("GOES requires a positive integer spacecraft number in probe")
+        return str(int(probe))
+    if options["probes"]:
+        if probe not in options["probes"]:
+            choices = ", ".join(repr(name) for name in options["probes"])
+            raise ValueError(f"unsupported {mission} probe {probe!r}; choose one of {choices}")
+    elif probe is not None:
+        raise ValueError(f"{mission} does not accept a probe")
+    return probe
 
 
 def qualify_variables(mission, product, variables, probe):
@@ -128,6 +163,9 @@ def qualify_variables(mission, product, variables, probe):
         variables = [variables]
     if mission == "omni":
         return list(variables)
+    if mission == "goes":
+        prefix = f"g{probe}_orbit_"
+        return [name if str(name).startswith(prefix) else prefix + str(name).lstrip("_") for name in variables]
     if mission == "themis":
         if product == "esd":
             return [str(name).lstrip("_") for name in variables]
@@ -220,23 +258,27 @@ def _read_mms(trange, *, product, variables, probe, base, download, level="l2", 
     from pyspedas.projects.mms.mms_config import CONFIG
 
     CONFIG["local_data_dir"] = directory
-    if product not in ("fpi", "hpca"):
-        raise ValueError("MMS product must be 'fpi' or 'hpca'")
+    if product not in MMS_FIELDS:
+        raise ValueError(f"unsupported MMS product {product!r}")
     names = list(variables or [])
     full_names = []
-    stem = f"mms{probe}_dis_" if product == "fpi" else f"mms{probe}_hpca_"
+    stem = f"mms{probe}_{MMS_FIELDS[product]['stem']}_"
     for name in names:
         full_names.append(name if str(name).startswith("mms") else stem + str(name))
     datatype = kwargs.pop("datatype", None)
     if product == "fpi" and datatype is None:
         datatype = _fpi_datatypes(full_names)
+    elif product == "mec":
+        datatype = "epht89q" if datatype is None else datatype
+        kwargs.setdefault("data_rate", "srvy")
+    spdf = kwargs.pop("spdf", False)
 
     def call(no_update):
         common = dict(
             trange=trange,
             probe=str(probe),
             level=level,
-            spdf=False,
+            spdf=spdf,
             no_update=no_update,
             notplot=True,
             time_clip=True,
@@ -245,9 +287,11 @@ def _read_mms(trange, *, product, variables, probe, base, download, level="l2", 
         )
         if product == "fpi":
             return backend.mms_load_fpi(datatype=datatype, **common) or {}
+        if product == "mec":
+            return backend.mms_load_mec(datatype=datatype, **common) or {}
         return backend.mms_load_hpca(**common) or {}
 
-    if download in (False, "offline"):
+    if download in (False, "offline", "local"):
         raw = call(True)
     elif download in (True, "download", "local_first", "auto", "refresh"):
         raw = call(False)
@@ -258,6 +302,32 @@ def _read_mms(trange, *, product, variables, probe, base, download, level="l2", 
     vectors = {stem + name for name in spec["vectors"]}
     energy = {stem + name for name in spec["energy"]}
     return data, _variable_layouts(data, vectors=vectors, energy=energy)
+
+
+def _read_goes(trange, *, product, variables, probe, base, download, **kwargs):
+    from pyspedas.projects import goes
+    from pyspedas.projects.goes.config import CONFIG
+
+    CONFIG["local_data_dir"] = str(base / "goes_data")
+    if download in (False, "offline", "local"):
+        no_update = True
+    elif download in (True, "download", "local_first", "auto", "refresh"):
+        no_update = False
+    else:
+        raise ValueError("download must be local/offline, download/refresh, or local_first/auto")
+    root = f"g{probe}_orbit_"
+    call = dict(kwargs)
+    call.update(
+        trange=trange, probe=probe,
+        # GOES selects CDF names before adding its output-variable prefix.
+        varnames=[name.removeprefix(root) for name in variables],
+        notplot=True, time_clip=True, no_update=no_update,
+        force_download=download == "refresh",
+    )
+    raw = goes.load_orbit(**call) or {}
+    data = {name: value for name, value in raw.items() if name in variables}
+    vectors = {root + name for name in GOES_FIELDS[product]["vectors"]}
+    return data, _variable_layouts(data, vectors=vectors)
 
 
 def _read_omni(trange, *, variables, base, download, **kwargs):
@@ -351,13 +421,9 @@ def read_spedas(
         raise ValueError(f"unsupported {key} product {product!r}; choose one of {choices}")
     if level is None:
         level = default_level(key, product)
-    if options["probes"]:
-        probe = options["default_probe"] if probe is None else str(probe).lower()
-        if probe not in options["probes"]:
-            choices = ", ".join(repr(name) for name in options["probes"])
-            raise ValueError(f"unsupported {key} probe {probe!r}; choose one of {choices}")
-    elif probe is not None:
-        raise ValueError(f"{key} does not accept a probe")
+    if key == "goes" and level is not None:
+        raise ValueError("GOES orbit has no level option")
+    probe = normalize_probe(key, probe)
     variables = qualify_variables(
         key, product,
         default_variables(key, product, probe) if variables is None else variables,
@@ -373,6 +439,11 @@ def read_spedas(
         data, layouts = _read_mms(
             trange, product=product, variables=variables, probe=probe,
             level=level, base=base, download=download, **kwargs,
+        )
+    elif key == "goes":
+        data, layouts = _read_goes(
+            trange, product=product, variables=variables, probe=probe,
+            base=base, download=download, **kwargs,
         )
     elif key == "omni":
         data, layouts = _read_omni(

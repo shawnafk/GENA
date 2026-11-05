@@ -59,7 +59,7 @@ Follow this ownership order:
 - `gena.frame`, `gena.filter`, `gena.constants`: GENA table types, detector masks, and calibration/efficiency. `load` owns local GENA product loading.
 - `gena.post`: derived science statistics, ray/projection geometry, and reports.
 - `gena.raw`: telemetry packet parsing and raw/L0/L1/L2 conversion with writes.
-- `load`: GENA and geomagnetic-index loading through `load_gena`/`load_indices`, and THEMIS/MMS/OMNI through the sole `load_spedas(mission, ...)` entrypoint; external observations are loaded into `TimeSeriesDataFrame`. `libs.regions` owns cross-mission region classification.
+- `load`: GENA and geomagnetic-index loading through `load_gena`/`load_indices`, and THEMIS/MMS/GOES/OMNI through the sole `load_spedas(mission, ...)` entrypoint; external observations are loaded into `TimeSeriesDataFrame`. `libs.regions` owns cross-mission region classification.
 - `plots.basic`: GENA, THEMIS, MMS, and OMNI product plots. Old mission `vis`
   modules have been removed; `plots.vis` owns primitives.
 - `plots.advance`: reusable cross-mission composition of preloaded data
@@ -79,7 +79,8 @@ inside an analysis script or create sideways mission dependencies.
 - Expect GENA loaders to return `ENA_DataFrame`; expect THEMIS/MMS/OMNI/index loaders to return `TimeSeriesDataFrame` by default, with per-variable `x`/`y` dictionaries available only through the explicit legacy return option.
 - Keep filtering as boolean masks until row selection. `FilterNode` supports
   `&`, `|`, and `~`; Row selection is owned by `TimeSeriesDataFrame.select`; no separate selector class is retained.
-- Distinguish per-event L2 pose columns from engineering-data interpolation through `ParameterDataFrame.pos_at/rot_at`.
+- Read stored GENA pose with `frame.pos()` (Moon-relative MJ2000 metres) and `frame.rot()` (QQ→ECI2000 xyzw arrays, invalid rows NaN); both preserve row order without interpolation. Only PDF `ParameterDataFrame.pos_at(times)` and `rot_at(times)` interpolate engineering data.
+- Define FOV targets separately from observers: sphere center/radius, curve points, or discrete points. Use `gena.post.project.obj_in_view` for viewing and `dipole_fieldlines` for reference target definitions; lunar blocking shares this projection. Prepare ephemeris, satellite positions and model curves before calling it.
 - Pass probe identity consistently through filters, conversion, calibration,
   projection, and plotting.
 - Treat unit-area, unit-solid-angle, or unit-exposure flux defaults as proxies
@@ -121,10 +122,10 @@ Use this as a routing example, not as a substitute for checking live signatures:
 
 ```python
 from gena import filter as gf
-from load import load_gena
+from load import load_data
 from gena.post import statistic as stat
 
-l2 = load_gena(trange=trange, product="l2_a")
+l2 = load_data("gena", trange=trange, product="l2_a")
 l2 = l2.select(gf.energy_eff(Emin=4, Emax=100) & gf.onboard_eff())
 weights = build_event_weights(l2)
 centers, flux, flux_err = stat.flux_e(l2, energy_bins, exposure=exposure_seconds, geometric_factor=geometric_factor, weights=weights)

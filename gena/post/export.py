@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from common.config import resolve_output_path
+from common.constants import RE
 from common.frame import concat
 from common.time import Time
 from plots.tools import savefig
@@ -22,9 +23,9 @@ from plots import gena as gena_vis
 from plots.joint import env
 from plots.scene import write_html as write_scene_html
 from gena.frame import ParameterDataFrame
-from load import load
+from load import load_data
 
-from .project import get_frame, get_ray, get_spacecraft_pos
+from .project import event_axes, ray_from_L2, position_as_coord
 
 __all__ = [
     "batch_plot",
@@ -350,9 +351,9 @@ def observation_summary(
     prob = normalize_probe(prob)
     periods = normalize_report_times(time)
     output_dir = resolve_output_path(output_dir)
-    pdf = concat([load("gena", trange=list(period), product="pdf") for period in periods])
+    pdf = concat([load_data("gena", trange=list(period), product="pdf") for period in periods])
     ena = concat([
-        load("gena", trange=list(period), product=f"{ena_product}_{prob}")
+        load_data("gena", trange=list(period), product=f"{ena_product}_{prob}")
         for period in periods
     ])
     summary = build_observation_summary(
@@ -372,17 +373,19 @@ def observation_summary(
 
 
 
-def dump( l2df, prob="A", coord="GSM", *, extra_columns=("Energy",), normalize_ray=True, output_path=None,):
-    """Build a tabular L2 geometry product from a GENA L2 DataFrame."""
+def dump( l2df, prob="A", coord="GSM", *, pos_offset, extra_columns=("Energy",), normalize_ray=True, output_path=None,):
+    """Build L2 geometry using a prepared ECI2000 geocentric Moon offset in R_E."""
     prob = prob.upper()
-    pos = get_spacecraft_pos(l2df, coord=coord)
-    ray_obj = get_ray(l2df, prob=prob, coord=coord)
+    locations = l2df.pos() / RE
+    pos = position_as_coord(l2df["Datetime"], locations, pos_offset=pos_offset,
+                            ref_coord="ECI2000", res_coord=coord)
+    ray_obj = ray_from_L2(l2df, probe=prob, coord=coord)
     ray = np.asarray(ray_obj[coord], dtype=float)
     if normalize_ray:
         norm = np.linalg.norm(ray, axis=1)
         ray = ray / np.where(norm == 0, np.nan, norm)[:, np.newaxis]
 
-    frame_xyz = get_frame(l2df, prob=prob, coord=coord)
+    frame_xyz = event_axes(l2df, probe=prob, coord=coord)
     out = pd.DataFrame(
         {
             "Timestamp": l2df.loc[:, "Timestamp"].to_numpy(),
@@ -425,7 +428,7 @@ def load_products(period, prob):
         "l2f": f"l2f_{prob}",
     }
     return {
-        name: load("gena", trange=interval, product=product)
+        name: load_data("gena", trange=interval, product=product)
         for name, product in product_names.items()
     }
 

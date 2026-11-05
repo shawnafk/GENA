@@ -41,7 +41,7 @@ module.FOCUS = {
 
 def main():
     events = module.load_ena()
-    fgm = module.load("themis", module.TRANGE, "fgm", probe="a",
+    fgm = module.load_data("themis", module.TRANGE, "fgm", probe="a",
                       variables=["fgs_gsm"], download=False)
     los = module.ena_direction_angle(events, fgm)
     ena, _ = module.ena_metrics(events)

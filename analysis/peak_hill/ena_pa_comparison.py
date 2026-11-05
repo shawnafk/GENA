@@ -36,9 +36,9 @@ import pandas as pd
 from cdflib import CDF
 
 from common.config import get_configured_paths
-from load import load
+from load import load_data
 from gena.post import statistic as stat
-from gena.post.project import event_vectors
+from gena.utils import velocity
 from libs.plasma import sigma_HH
 
 warnings.filterwarnings("ignore")
@@ -121,7 +121,7 @@ def load_ena():
         "MJ2000_q1", "MJ2000_q2", "MJ2000_q3",
         "MJ2000_Star_X", "MJ2000_Star_Y", "MJ2000_Star_Z",
     ]
-    return load("gena", TRANGE, GENA_PRODUCT, columns=columns)
+    return load_data("gena", TRANGE, GENA_PRODUCT, columns=columns)
 
 
 def ena_direction_angle(events, fgm):
@@ -129,7 +129,7 @@ def ena_direction_angle(events, fgm):
     quaternion = events[["MJ2000_q1", "MJ2000_q2", "MJ2000_q3"]].to_numpy(dtype=float)
     valid = np.all(np.isfinite(quaternion), axis=1) & (np.sum(quaternion**2, axis=1) <= 1.0 + 1e-8)
     valid &= np.all(np.isfinite(events[["X1", "X2", "Y1", "Y2", "Tof"]].to_numpy(dtype=float)), axis=1)
-    vectors = event_vectors(events.loc[valid].reset_index(drop=True), coord="GSM", probe="A")
+    vectors = velocity(events.loc[valid].reset_index(drop=True), coord="GSM", probe="A")
     direction = vectors[["DX", "DY", "DZ"]].to_numpy(dtype=float)
     field = fgm[[f"{PREFIX}_fgs_gsm_x", f"{PREFIX}_fgs_gsm_y", f"{PREFIX}_fgs_gsm_z"]].to_numpy(dtype=float)
     field_time = fgm["Timestamp"].to_numpy(dtype=float)
@@ -167,8 +167,8 @@ def ena_metrics(events):
 # THEMIS ESA / SST / ESD
 # ---------------------------------------------------------------------------
 def load_esa():
-    esa = load("themis", TRANGE, "esa", probe=PROBE, download=False)
-    fgm = load("themis", TRANGE, "fgm", probe=PROBE, variables=["fgs_gsm"], download=False)
+    esa = load_data("themis", TRANGE, "esa", probe=PROBE, download=False)
+    fgm = load_data("themis", TRANGE, "fgm", probe=PROBE, variables=["fgs_gsm"], download=False)
     energy, keep = _stack_array_column(esa, f"{PREFIX}_peir_en_eflux_energy", 32)
     eflux, keep_flux = _stack_array_column(esa, f"{PREFIX}_peir_en_eflux", 32)
     keep = keep & keep_flux
@@ -179,7 +179,7 @@ def load_esa():
 
 
 def load_sst():
-    sst = load("themis", TRANGE, "sst", probe=PROBE, download=False)
+    sst = load_data("themis", TRANGE, "sst", probe=PROBE, download=False)
     energy, keep = _stack_array_column(sst, f"{PREFIX}_psif_en_eflux_energy", 16)
     eflux, keep_flux = _stack_array_column(sst, f"{PREFIX}_psif_en_eflux", 16)
     keep = keep & keep_flux
@@ -652,7 +652,7 @@ def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     events = load_ena()
-    fgm = load("themis", TRANGE, "fgm", probe=PROBE, variables=["fgs_gsm"], download=False)
+    fgm = load_data("themis", TRANGE, "fgm", probe=PROBE, variables=["fgs_gsm"], download=False)
     los = ena_direction_angle(events, fgm)
     ena, per_minute = ena_metrics(events)
     esa = load_esa()

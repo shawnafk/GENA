@@ -14,6 +14,7 @@ import os
 import numpy as np
 import pandas as pd
 from scipy import optimize
+from common.time import Time
 
 
 class _LazyGeopack:
@@ -546,14 +547,16 @@ def get_obj(ISOT,DST=0,D_p=1,beta=5,M_ms=5,B_y=0,B_z=0):
 
 from load import load_sw
 # ---------------------------------------------------------------------------
-# Solar wind parameter interpolation  (heavily used by cross-mission analysis)
+# Solar-wind interval averages for boundary and field models.
 # ---------------------------------------------------------------------------
 
 def get_obj_ave(st_time,use_average_sw_params=True):
+    """Build models using native solar-wind averages over [start, end]."""
+    midpoint = float(np.mean(Time(st_time).to_timestamp()))
     if use_average_sw_params:
-        #add verify and backup
         sw_paras = load_sw(st_time)
-        ave_sw_paras = {k: np.mean(v) for k, v in sw_paras.items()}
+        fields = ['BZ_GSM', 'Mgs_mach_num', 'Beta', 'SYM_H', 'Pressure']
+        ave_sw_paras = sw_paras[fields].mean().to_dict()
         by = 0
         bz = ave_sw_paras['BZ_GSM']
         mgs = ave_sw_paras['Mgs_mach_num']
@@ -562,7 +565,7 @@ def get_obj_ave(st_time,use_average_sw_params=True):
         dp = ave_sw_paras['Pressure'] 
         bs_ave = Bowshock(bz, beta, mgs, dp)
         mp_ave = Magnetopause(bz, dp)
-        fl = T96_fieldlines(np.average(st_time),dp,dst,by,bz)
+        fl = T96_fieldlines(midpoint,dp,dst,by,bz)
     else:
         by = 0
         bz = 0
@@ -572,7 +575,7 @@ def get_obj_ave(st_time,use_average_sw_params=True):
         dp = 5 
         bs_ave = Bowshock(bz, beta, mgs, dp)
         mp_ave = Magnetopause(bz, dp)
-        fl = T96_fieldlines(np.average(st_time),dp,dst,by,bz)
+        fl = T96_fieldlines(midpoint,dp,dst,by,bz)
     obj={}
     obj['earth'] = Star()
     obj['bs'] = bs_ave

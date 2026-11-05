@@ -298,6 +298,7 @@ def format_pos_date(ax, sat_name='MMS1', *, fontsize=12, max_ticks=8):
     from load import load_pos
     from common.constants import RE
     from common.coord import coord
+    from common.frame import read_variable
 
     name = str(sat_name).strip().upper()
     if name in {'QUEQIAO', 'QQ', 'GENA'}:
@@ -323,16 +324,22 @@ def format_pos_date(ax, sat_name='MMS1', *, fontsize=12, max_ticks=8):
         if x not in position_cache:
             try:
                 dt = mdates.num2date(x, tz=datetime.timezone.utc)
-                positions = np.asarray(
-                    load_pos(mission, [dt], satellite_id, coord='gsm'),
-                    dtype=float,
+                pad = datetime.timedelta(hours=1)
+                frame = load_pos(
+                    mission, [dt - pad, dt + pad], satellite_id, coord='gsm',
                 )
                 if mission == 'queqiao':
+                    columns = ['MJ2000_Star_X', 'MJ2000_Star_Y', 'MJ2000_Star_Z']
+                    positions = frame.resample_at([dt])[columns].to_numpy(dtype=float)
                     earth_centred = positions + np.asarray(epms.moon([dt])) * 1000.0
                     orbit = coord([dt], earth_centred, 'ECI2000', 0)
                     orbit.convert('GSM')
                     positions = np.asarray(orbit['GSM'], dtype=float) / RE
                 else:
+                    variable = next(iter(frame.attrs['variables']), None)
+                    if variable is None:
+                        raise ValueError("No satellite position samples available")
+                    positions = read_variable(frame.resample_at([dt]), variable)['values']
                     positions = positions * 1000.0 / RE
                 if positions.shape != (1, 3):
                     raise ValueError(
